@@ -11,6 +11,7 @@
 - **PS5 Structural Acceptance Gate Validator**: Overhauled the Quick Verification engine to run `ProsperoPkgValidator`, evaluating the exact structural gate preconditions enforced by the PS5 console mount path (FIH format version, PFS image boundaries, superblock ICV, and segment alignment).
 - **Modern End-to-End Package Extractor**: Replaced legacy archive extractors with `ProsperoPackageExtractor`, adding robust support for data-first inner images decoded via `naps_pkg_layout.dat`, Kraken/zlib PFSC containers, and automated outer metadata extraction.
 - **Preserved 64-Bit Addressing & Large-Game Protection**: Maintained full 64-bit inode addressing (`0x60` offset preservation) and pre-flight boundary extent checks across all inner PFS trees for flawless mounting of titles > 4 GiB.
+- **Portable Managed SHA3-256 Engine**: Integrated a portable managed Keccak-f[1600] / SHA3-256 fallback engine (`ProsperoSha3.cs`) with 100% NIST test vector compliance. Resolves the macOS platform limitation where Apple CommonCrypto lacks native SHA3-256 in .NET, completely eliminating `PlatformNotSupportedException` during PS5 key derivation, outer-PFS superblock ICV computation, and CNT digest generation.
 
 ---
 

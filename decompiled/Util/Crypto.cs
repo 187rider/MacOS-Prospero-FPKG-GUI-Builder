@@ -125,20 +125,25 @@ public static class Crypto
     /// </summary>
     public static byte[] Sha3_256(byte[] data)
     {
-        if (!SHA3_256.IsSupported)
-            throw new PlatformNotSupportedException(
-                "SHA3-256 is required for PS5 PFS key derivation and digests but is not available on this platform/runtime.");
-        return SHA3_256.HashData(data);
+        if (SHA3_256.IsSupported)
+            return SHA3_256.HashData(data);
+        return ProsperoSha3.HashData(data);
+    }
+
+    public static byte[] Sha3_256(ReadOnlySpan<byte> data)
+    {
+        if (SHA3_256.IsSupported)
+            return SHA3_256.HashData(data);
+        return ProsperoSha3.HashData(data);
     }
 
     /// <summary>Computes the SHA3-256 hash over the whole stream (used for PS5 CNT body/entry digests).</summary>
     public static byte[] Sha3_256(Stream data)
     {
-        if (!SHA3_256.IsSupported)
-            throw new PlatformNotSupportedException(
-                "SHA3-256 is required for PS5 PFS digests but is not available on this platform/runtime.");
         data.Position = 0;
-        return SHA3_256.HashData(data);
+        if (SHA3_256.IsSupported)
+            return SHA3_256.HashData(data);
+        return ProsperoSha3.HashData(data);
     }
 
     /// <summary>
