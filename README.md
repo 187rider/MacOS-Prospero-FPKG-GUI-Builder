@@ -21,13 +21,11 @@ A high-performance, modern native GUI application for building PlayStation 5 Fak
 
 ---
 
-## 📋 Prerequisites
+## 📋 System Requirements
 
-- **macOS**: macOS 11.0 (Big Sur) or higher (Apple Silicon `arm64` or Intel `x64`).
-- **.NET SDK**: .NET 9.0 or 10.0.
-  ```bash
-  brew install dotnet-sdk
-  ```
+- **macOS**: macOS 11.0 (Big Sur) or higher (Native Apple Silicon M1/M2/M3/M4 `arm64` or Intel `x64`).
+- **End Users**: **Zero prerequisites**. The pre-compiled `LibProsperoPkg.app` is a 100% self-contained native Mach-O application bundle with ReadyToRun AOT machine code pre-compiled for Apple Silicon. No .NET or Homebrew needed.
+- **Building from source (Optional)**: .NET SDK 10.0 (`brew install dotnet-sdk`).
 
 ---
 

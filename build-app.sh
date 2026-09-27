@@ -4,12 +4,22 @@ set -e
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd "$DIR"
 
-echo "Building LibProsperoPkg macOS GUI..."
-dotnet publish gui/gui.csproj -c Release -o gui/publish
+# Detect architecture (arm64 for Apple Silicon M1-M4, x64 for Intel)
+ARCH="$(uname -m)"
+if [ "$ARCH" = "arm64" ]; then
+    RID="osx-arm64"
+else
+    RID="osx-x64"
+fi
+
+echo "Building LibProsperoPkg native self-contained bundle for $ARCH ($RID)..."
+rm -rf gui/publish
+dotnet publish gui/gui.csproj -c Release -r "$RID" --self-contained -p:PublishReadyToRun=true -o gui/publish
 
 mkdir -p LibProsperoPkg.app/Contents/MacOS
 mkdir -p LibProsperoPkg.app/Contents/Resources
 
+rm -rf LibProsperoPkg.app/Contents/MacOS/*
 cp -R gui/publish/* LibProsperoPkg.app/Contents/MacOS/
 
 cat << 'EOF' > LibProsperoPkg.app/Contents/Info.plist
@@ -39,26 +49,6 @@ cat << 'EOF' > LibProsperoPkg.app/Contents/Info.plist
 </plist>
 EOF
 
-cat << 'EOF' > LibProsperoPkg.app/Contents/MacOS/LibProsperoPkg.Gui
-#!/bin/bash
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Detect Homebrew dotnet or system dotnet
-if [ -z "$DOTNET_ROOT" ]; then
-    if [ -d "/opt/homebrew/Cellar/dotnet" ]; then
-        LATEST_DOTNET=$(ls -d /opt/homebrew/Cellar/dotnet/*/libexec 2>/dev/null | tail -n 1)
-        if [ -n "$LATEST_DOTNET" ]; then
-            export DOTNET_ROOT="$LATEST_DOTNET"
-        fi
-    elif [ -d "/usr/local/share/dotnet" ]; then
-        export DOTNET_ROOT="/usr/local/share/dotnet"
-    fi
-fi
-
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-exec dotnet "$DIR/LibProsperoPkg.Gui.dll" "$@"
-EOF
-
 chmod +x LibProsperoPkg.app/Contents/MacOS/LibProsperoPkg.Gui
 
-echo "Build complete! LibProsperoPkg.app is ready."
+echo "Build complete! LibProsperoPkg.app is a native self-contained $ARCH application."
