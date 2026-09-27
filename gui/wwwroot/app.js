@@ -125,6 +125,17 @@
     });
   }
 
+  function resetBuildButtons() {
+    isBuilding = false;
+    btnBuild.style.display = 'inline-flex';
+    btnBuild.disabled = false;
+    if (btnCancel) {
+      btnCancel.style.display = 'none';
+      btnCancel.disabled = false;
+      btnCancel.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg><span>Cancel Build</span>`;
+    }
+  }
+
   // --- Host Message Router ---
   function handleHostMessage(type, data) {
     switch (type) {
@@ -195,11 +206,8 @@
         break;
 
       case 'buildCompleted':
-        isBuilding = false;
+        resetBuildButtons();
         setGlobalStatus('ready', 'Build Successful (100%)');
-        btnBuild.style.display = 'inline-flex';
-        btnBuild.disabled = false;
-        if (btnCancel) btnCancel.style.display = 'none';
         updateProgress(100, 'Done', 'Build complete!');
         if (globalTopProgressFill) globalTopProgressFill.style.width = '100%';
         setTimeout(() => {
@@ -226,21 +234,15 @@
         break;
 
       case 'buildCancelled':
-        isBuilding = false;
+        resetBuildButtons();
         setGlobalStatus('ready', 'Build Cancelled');
-        btnBuild.style.display = 'inline-flex';
-        btnBuild.disabled = false;
-        if (btnCancel) btnCancel.style.display = 'none';
         if (globalTopProgress) globalTopProgress.style.display = 'none';
         appendLog('[CANCEL] ' + (data.message || 'Build was cancelled by user. Temporary files cleared.'), 'warning');
         break;
 
       case 'buildError':
-        isBuilding = false;
+        resetBuildButtons();
         setGlobalStatus('ready', 'Build Failed');
-        btnBuild.style.display = 'inline-flex';
-        btnBuild.disabled = false;
-        if (btnCancel) btnCancel.style.display = 'none';
         if (globalTopProgress) globalTopProgress.style.display = 'none';
 
         buildResultBanner.style.display = 'flex';
@@ -267,22 +269,22 @@
         break;
 
       case 'packageInfoError':
-        setUnpackStatus('error', `Ошибка: ${data.message}`);
+        setUnpackStatus('error', `Error: ${data.message}`);
         break;
 
       case 'quickVerifyResult':
         if (data.success) {
-          setUnpackStatus('success', 'Быстрая проверка пройдена');
+          setUnpackStatus('success', 'Quick verification passed');
         } else {
-          setUnpackStatus('error', data.message || 'Ошибка проверки');
+          setUnpackStatus('error', data.message || 'Verification failed');
         }
         break;
 
       case 'unpackResult':
         if (data.success) {
-          setUnpackStatus('success', 'Распаковка завершена');
+          setUnpackStatus('success', 'Unpacking complete');
         } else {
-          setUnpackStatus('error', data.message || 'Ошибка распаковки');
+          setUnpackStatus('error', data.message || 'Unpacking failed');
         }
         break;
 
@@ -397,16 +399,17 @@
     if (topProgressBadge && stage) topProgressBadge.textContent = stage;
     if (topProgressDesc && desc) topProgressDesc.textContent = desc;
 
-    // Safety unhide: ensure top progress bar and cancel button are visible
-    if (globalTopProgress && globalTopProgress.style.display === 'none') {
-      globalTopProgress.style.display = 'block';
+    if (isBuilding) {
+      // Safety unhide: ensure top progress bar and cancel button are visible while building
+      if (globalTopProgress && globalTopProgress.style.display === 'none') {
+        globalTopProgress.style.display = 'block';
+      }
+      if (btnCancel && btnCancel.style.display === 'none') {
+        btnCancel.style.display = 'inline-flex';
+        btnBuild.style.display = 'none';
+      }
+      setGlobalStatus('building', `Building ${clamped}% Total${stage ? ' • ' + stage : ''}`);
     }
-    if (btnCancel && btnCancel.style.display === 'none') {
-      btnCancel.style.display = 'inline-flex';
-      btnBuild.style.display = 'none';
-    }
-
-    setGlobalStatus('building', `Building ${clamped}% Total${stage ? ' • ' + stage : ''}`);
   }
 
   btnOpenOutput.addEventListener('click', () => {
@@ -530,23 +533,23 @@
   btnRunQuickVerify.addEventListener('click', () => {
     const path = unpackPkgPath.value.trim();
     if (!path) {
-      alert('Пожалуйста, выберите файл PKG для проверки.');
+      alert('Please select a PKG file to verify.');
       return;
     }
     const passcode = unpackPasscode.value.trim() || '00000000000000000000000000000000';
-    setUnpackStatus('active', 'Выполняется быстрая проверка...');
+    setUnpackStatus('active', 'Running quick verification...');
     sendToHost('runQuickVerify', { path, passcode });
   });
 
   btnRunUnpack.addEventListener('click', () => {
     const path = unpackPkgPath.value.trim();
     if (!path) {
-      alert('Пожалуйста, выберите файл PKG для распаковки.');
+      alert('Please select a PKG file to unpack.');
       return;
     }
     const output = unpackOutDir.value.trim();
     const passcode = unpackPasscode.value.trim() || '00000000000000000000000000000000';
-    setUnpackStatus('active', 'Выполняется распаковка...');
+    setUnpackStatus('active', 'Unpacking package...');
     sendToHost('unpackPkg', { path, output, passcode });
   });
 
@@ -557,12 +560,12 @@
   });
 
   btnClearUnpackLog.addEventListener('click', () => {
-    unpackTerminalLog.innerHTML = '<div class="log-entry system">[SYSTEM] Журнал очищен.</div>';
+    unpackTerminalLog.innerHTML = '<div class="log-entry system">[SYSTEM] Log cleared.</div>';
   });
 
   function loadPkgInfo(path) {
     if (!path) return;
-    setUnpackStatus('active', 'Чтение информации о пакете...');
+    setUnpackStatus('active', 'Reading package information...');
     const passcode = unpackPasscode.value.trim() || '00000000000000000000000000000000';
     sendToHost('loadPackageInfo', { path, passcode });
   }
@@ -570,8 +573,8 @@
   function appendUnpackVerifyLog(line) {
     const entry = document.createElement('div');
     entry.className = 'log-entry';
-    if (line.includes('ОШИБКА:')) entry.classList.add('error');
-    else if (line.includes('РЕЗУЛЬТАТ: ошибок не обнаружено') || line.includes('успешно')) entry.classList.add('success');
+    if (line.includes('ERROR:') || line.includes('Error:')) entry.classList.add('error');
+    else if (line.includes('RESULT: no errors found') || line.includes('RESULT: No errors found.') || line.includes('success') || line.includes('successfully')) entry.classList.add('success');
     entry.textContent = line;
     unpackTerminalLog.appendChild(entry);
     unpackTerminalLog.scrollTop = unpackTerminalLog.scrollHeight;
@@ -607,7 +610,7 @@
       pkgCoverEmpty.style.display = 'flex';
     }
 
-    setUnpackStatus('', 'Информация о пакете прочитана');
+    setUnpackStatus('', 'Package information loaded');
   }
 
   // --- Helper Functions ---

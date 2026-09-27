@@ -34,7 +34,7 @@
         </button>
         <button class="nav-tab" data-tab="unpack-verify" id="tab-btn-unpack-verify">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
-          Распаковка и проверка
+          Unpack & Verify
         </button>
         <button class="nav-tab" data-tab="inspect" id="tab-btn-inspect">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
@@ -314,28 +314,28 @@
         </div>
       </section>
 
-      <!-- TAB 2: UNPACK & VERIFY (РАСПАКОВКА И ПРОВЕРКА) -->
+      <!-- TAB 2: UNPACK & VERIFY -->
       <section class="tab-pane" id="pane-unpack-verify">
         <div class="unpack-verify-layout">
           <!-- Left Column: Settings & Package Information -->
           <div class="unpack-left-col">
-            <!-- Group Box: Распаковка и проверка -->
+            <!-- Group Box: Unpack & Verify -->
             <div class="group-box-container">
-              <div class="group-box-title">Распаковка и проверка</div>
+              <div class="group-box-title">Unpack & Verify</div>
               <div class="group-box-content">
                 <div class="unpack-form-row">
-                  <label class="unpack-field-label">Файл PKG</label>
+                  <label class="unpack-field-label">PKG File</label>
                   <div class="unpack-field-input-wrap">
-                    <input type="text" id="unpack-pkg-path" placeholder="Выберите .pkg файл..." spellcheck="false">
-                    <button type="button" class="btn btn-secondary btn-sm" id="btn-browse-unpack-pkg">Выбрать...</button>
+                    <input type="text" id="unpack-pkg-path" placeholder="Select a .pkg file..." spellcheck="false">
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-browse-unpack-pkg">Browse...</button>
                   </div>
                 </div>
 
                 <div class="unpack-form-row">
-                  <label class="unpack-field-label">Папка распаковки</label>
+                  <label class="unpack-field-label">Output Directory</label>
                   <div class="unpack-field-input-wrap">
-                    <input type="text" id="unpack-out-dir" placeholder="Папка для распакованных файлов..." spellcheck="false">
-                    <button type="button" class="btn btn-secondary btn-sm" id="btn-browse-unpack-dir">Выбрать...</button>
+                    <input type="text" id="unpack-out-dir" placeholder="Directory for unpacked files..." spellcheck="false">
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-browse-unpack-dir">Browse...</button>
                   </div>
                 </div>
 
@@ -343,7 +343,7 @@
                   <label class="unpack-field-label">Passcode</label>
                   <div class="unpack-field-input-wrap">
                     <input type="password" id="unpack-passcode" value="00000000000000000000000000000000" maxlength="32" spellcheck="false" class="passcode-input">
-                    <button type="button" class="btn btn-secondary btn-sm btn-icon" id="btn-toggle-passcode" title="Показать/скрыть">
+                    <button type="button" class="btn btn-secondary btn-sm btn-icon" id="btn-toggle-passcode" title="Show/Hide">
                       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                     </button>
                   </div>
@@ -352,25 +352,25 @@
                 <div class="unpack-btn-bar">
                   <button type="button" class="btn btn-primary btn-sm" id="btn-run-quick-verify">
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
-                    <span>Быстрая проверка</span>
+                    <span>Quick Verify</span>
                   </button>
                   <button type="button" class="btn btn-secondary btn-sm" id="btn-run-unpack">
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                    <span>Распаковать</span>
+                    <span>Unpack</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            <!-- Group Box: Информация о пакете -->
+            <!-- Group Box: Package Information -->
             <div class="group-box-container pkg-info-group">
-              <div class="group-box-title">Информация о пакете</div>
+              <div class="group-box-title">Package Information</div>
               <div class="group-box-content pkg-info-body">
                 <div class="pkg-info-table-scroll">
                   <table class="pkg-info-table">
                     <tbody>
                       <tr>
-                        <td class="info-label-cell">Название</td>
+                        <td class="info-label-cell">Title</td>
                         <td class="info-value-cell bold-val" id="info-val-title">—</td>
                       </tr>
                       <tr>
@@ -378,23 +378,23 @@
                         <td class="info-value-cell code-font" id="info-val-content-id">—</td>
                       </tr>
                       <tr>
-                        <td class="info-label-cell">Версия игры</td>
+                        <td class="info-label-cell">Game Version</td>
                         <td class="info-value-cell" id="info-val-version">—</td>
                       </tr>
                       <tr>
-                        <td class="info-label-cell">Версия SDK</td>
+                        <td class="info-label-cell">SDK Version</td>
                         <td class="info-value-cell code-font" id="info-val-sdk">—</td>
                       </tr>
                       <tr>
-                        <td class="info-label-cell">Требования системы</td>
+                        <td class="info-label-cell">System Requirements</td>
                         <td class="info-value-cell code-font" id="info-val-sys-req">—</td>
                       </tr>
                       <tr>
-                        <td class="info-label-cell">Доступные языки</td>
+                        <td class="info-label-cell">Languages</td>
                         <td class="info-value-cell" id="info-val-languages">—</td>
                       </tr>
                       <tr>
-                        <td class="info-label-cell">Языки PlayGo</td>
+                        <td class="info-label-cell">PlayGo Languages</td>
                         <td class="info-value-cell playgo-langs" id="info-val-playgo-languages">—</td>
                       </tr>
                       <tr>
@@ -402,23 +402,23 @@
                         <td class="info-value-cell" id="info-val-playgo">—</td>
                       </tr>
                       <tr>
-                        <td class="info-label-cell">Тип DRM</td>
+                        <td class="info-label-cell">DRM Type</td>
                         <td class="info-value-cell" id="info-val-drm">—</td>
                       </tr>
                       <tr>
-                        <td class="info-label-cell">Контейнер</td>
+                        <td class="info-label-cell">Container</td>
                         <td class="info-value-cell" id="info-val-container">—</td>
                       </tr>
                       <tr>
-                        <td class="info-label-cell">Тип содержимого</td>
+                        <td class="info-label-cell">Content Type</td>
                         <td class="info-value-cell" id="info-val-content-type">—</td>
                       </tr>
                       <tr>
-                        <td class="info-label-cell">Сегменты пакета</td>
+                        <td class="info-label-cell">Package Segments</td>
                         <td class="info-value-cell segments-cell" id="info-val-segments">—</td>
                       </tr>
                       <tr>
-                        <td class="info-label-cell">Размер PKG</td>
+                        <td class="info-label-cell">PKG Size</td>
                         <td class="info-value-cell" id="info-val-pkg-size">—</td>
                       </tr>
                     </tbody>
@@ -431,7 +431,7 @@
                     <img id="pkg-cover-image" src="" alt="Cover Artwork" style="display: none;">
                     <div class="pkg-cover-empty" id="pkg-cover-empty">
                       <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-                      <span>Нет обложки</span>
+                      <span>No Cover Artwork</span>
                     </div>
                   </div>
                 </div>
@@ -443,19 +443,19 @@
           <div class="unpack-right-col">
             <div class="group-box-container full-height-group">
               <div class="group-box-title-row">
-                <div class="group-box-title">Журнал распаковки и проверки</div>
+                <div class="group-box-title">Unpack & Verification Log</div>
                 <div class="console-actions">
-                  <button type="button" class="btn-icon btn-sm" id="btn-copy-unpack-log" title="Копировать журнал">
+                  <button type="button" class="btn-icon btn-sm" id="btn-copy-unpack-log" title="Copy Log">
                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                   </button>
-                  <button type="button" class="btn-icon btn-sm" id="btn-clear-unpack-log" title="Очистить">
+                  <button type="button" class="btn-icon btn-sm" id="btn-clear-unpack-log" title="Clear Log">
                     <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                   </button>
                 </div>
               </div>
               <div class="group-box-content console-fill">
                 <div class="terminal unpack-terminal-log" id="unpack-terminal-log">
-                  <div class="log-entry system">[SYSTEM] Готово к распаковке и проверке. Выберите файл PKG.</div>
+                  <div class="log-entry system">[SYSTEM] Ready to unpack and verify. Select a PKG file.</div>
                 </div>
               </div>
             </div>
@@ -467,7 +467,8 @@
           <div class="unpack-status-bar-track">
             <div class="unpack-status-bar-fill" id="unpack-status-bar-fill"></div>
           </div>
-          <div class="unpack-status-text-label" id="unpack-status-text-label">Готово</div>
+          <div class="unpack-status-text-label" id="unpack-status-text-label">Ready</div>
+        </div>
         </div>
       </section>
     </main>

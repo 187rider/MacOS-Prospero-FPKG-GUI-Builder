@@ -134,7 +134,7 @@ public sealed class AppLogic
         string title = target switch
         {
             "source" => "Select PS5 Source Folder",
-            "unpackDir" => "Выберите папку для распаковки",
+            "unpackDir" => "Select Output Directory for Unpacking",
             _ => "Select Output Folder"
         };
 
@@ -153,7 +153,7 @@ public sealed class AppLogic
     private void HandleBrowseFile(JsonElement root)
     {
         string target = root.TryGetProperty("target", out var t) ? t.GetString() ?? "pkg" : "pkg";
-        string title = target == "unpackPkg" ? "Выберите файл пакета PS5 (.pkg)" : "Select PS5 Package File";
+        string title = target == "unpackPkg" ? "Select PS5 Package File (.pkg)" : "Select PS5 Package File";
         var filters = new (string Name, string[] Extensions)[]
         {
             ("PS5 Package (*.pkg)", new[] { "pkg" }),
@@ -808,17 +808,16 @@ public sealed class AppLogic
         SendResponse("unpackVerifyLog", new { line = $"[{time}] {message}" });
     }
 
-    private static string FormatSizeRu(long bytes)
+    private static string FormatSize(long bytes)
     {
-        var ru = new CultureInfo("ru-RU");
         if (bytes >= 1024L * 1024 * 1024 * 1024)
-            return $"{(double)bytes / (1024.0 * 1024 * 1024 * 1024):0.00} TiB".Replace('.', ',');
+            return $"{(double)bytes / (1024.0 * 1024 * 1024 * 1024):0.00} TiB";
         if (bytes >= 1024L * 1024 * 1024)
-            return $"{(double)bytes / (1024.0 * 1024 * 1024):0.00} GiB".Replace('.', ',');
+            return $"{(double)bytes / (1024.0 * 1024 * 1024):0.00} GiB";
         if (bytes >= 1024L * 1024)
-            return $"{(double)bytes / (1024.0 * 1024):0.00} MiB".Replace('.', ',');
+            return $"{(double)bytes / (1024.0 * 1024 * 1024):0.00} MiB";
         if (bytes >= 1024L)
-            return $"{(double)bytes / 1024.0:0.00} KiB".Replace('.', ',');
+            return $"{(double)bytes / 1024.0:0.00} KiB";
         return $"{bytes} bytes";
     }
 
@@ -867,12 +866,12 @@ public sealed class AppLogic
         {
             if (!File.Exists(pkgPath))
             {
-                SendResponse("packageInfoError", new { message = "Файл пакета не существует." });
+                SendResponse("packageInfoError", new { message = "Package file does not exist." });
                 return;
             }
 
             pkgPath = Path.GetFullPath(pkgPath);
-            SendUnpackLog($"Чтение пакета: {pkgPath}");
+            SendUnpackLog($"Reading package: {pkgPath}");
 
             var ru = new CultureInfo("ru-RU");
             var fi = new FileInfo(pkgPath);
@@ -935,7 +934,7 @@ public sealed class AppLogic
 
             // PlayGo
             string playgoLanguages = "—";
-            string playgoSummary = "1 чанков / 1 сценариев";
+            string playgoSummary = "1 chunks / 1 scenarios";
             int chunks = 1;
             int scenarios = 1;
 
@@ -1004,11 +1003,11 @@ public sealed class AppLogic
                 playgoLanguages = availableLanguages;
             }
 
-            playgoSummary = $"{chunks} чанков / {scenarios} сценариев";
+            playgoSummary = $"{chunks} chunks / {scenarios} scenarios";
 
             // Segments
-            string segments = $"FIH 64,00 KiB (65 536 bytes); outer PFS {FormatSizeRu(map.OuterPfsSize)} ({map.OuterPfsSize.ToString("#,##0", ru)} bytes); CNT {FormatSizeRu(map.CntSize)} ({map.CntSize.ToString("#,##0", ru)} bytes); SI {FormatSizeRu(map.SupplementSize)} ({map.SupplementSize.ToString("#,##0", ru)} bytes)";
-            string pkgSize = $"{FormatSizeRu(fileLength)} ({fileLength.ToString("#,##0", ru)} bytes)";
+            string segments = $"FIH 64.00 KiB (65,536 bytes); outer PFS {FormatSize(map.OuterPfsSize)} ({map.OuterPfsSize:N0} bytes); CNT {FormatSize(map.CntSize)} ({map.CntSize:N0} bytes); SI {FormatSize(map.SupplementSize)} ({map.SupplementSize:N0} bytes)";
+            string pkgSize = $"{FormatSize(fileLength)} ({fileLength:N0} bytes)";
 
             // Artwork: Check pic0.png or icon0.png
             string? coverImageBase64 = null;
@@ -1036,7 +1035,7 @@ public sealed class AppLogic
                 catch { }
             }
 
-            SendUnpackLog("Информация о пакете прочитана.");
+            SendUnpackLog("Package information loaded.");
 
             SendResponse("packageInfoResult", new
             {
@@ -1059,7 +1058,7 @@ public sealed class AppLogic
         }
         catch (Exception ex)
         {
-            SendUnpackLog($"ОШИБКА: {ex.Message}");
+            SendUnpackLog($"ERROR: {ex.Message}");
             SendResponse("packageInfoError", new { message = ex.Message });
         }
     }
@@ -1075,12 +1074,12 @@ public sealed class AppLogic
         {
             if (!File.Exists(pkgPath))
             {
-                SendUnpackLog($"ОШИБКА: Файл пакета не существует: {pkgPath}");
-                SendResponse("quickVerifyResult", new { success = false, message = "Файл пакета не существует." });
+                SendUnpackLog($"ERROR: Package file does not exist: {pkgPath}");
+                SendResponse("quickVerifyResult", new { success = false, message = "Package file does not exist." });
                 return;
             }
 
-            SendUnpackLog("Быстрая проверка структуры, метаданных и контрольных сумм CNT без распаковки игровых данных...");
+            SendUnpackLog("Quick verification of CNT structure, metadata, and digests without unpacking game data...");
 
             using var fs = File.OpenRead(pkgPath);
             var map = ProsperoPackageArchive.Inspect(fs);
@@ -1192,15 +1191,15 @@ public sealed class AppLogic
 
             // 7. Summary
             sw.Stop();
-            SendUnpackLog("Итоговый отчёт:");
-            SendUnpackLog($"Проверено записей CNT: {verifiedEntries}");
-            SendUnpackLog($"Время: {sw.Elapsed}");
-            SendUnpackLog("РЕЗУЛЬТАТ: ошибок не обнаружено.");
+            SendUnpackLog("Verification Summary:");
+            SendUnpackLog($"Verified CNT entries: {verifiedEntries}");
+            SendUnpackLog($"Elapsed time: {sw.Elapsed}");
+            SendUnpackLog("RESULT: No errors found.");
 
             SendResponse("quickVerifyResult", new
             {
                 success = true,
-                message = "Быстрая проверка пройдена",
+                message = "Quick verification passed",
                 elapsed = sw.Elapsed.ToString(),
                 entries = verifiedEntries
             });
@@ -1208,12 +1207,12 @@ public sealed class AppLogic
         catch (Exception ex)
         {
             sw.Stop();
-            SendUnpackLog($"ОШИБКА: {ex.Message}");
-            SendUnpackLog("РЕЗУЛЬТАТ: обнаружены ошибки.");
+            SendUnpackLog($"ERROR: {ex.Message}");
+            SendUnpackLog("RESULT: Errors detected.");
             SendResponse("quickVerifyResult", new
             {
                 success = false,
-                message = $"Ошибка проверки: {ex.Message}"
+                message = $"Verification failed: {ex.Message}"
             });
         }
     }
@@ -1230,8 +1229,8 @@ public sealed class AppLogic
         {
             if (!File.Exists(pkgPath))
             {
-                SendUnpackLog($"ОШИБКА: Файл пакета не существует: {pkgPath}");
-                SendResponse("unpackResult", new { success = false, message = "Файл пакета не существует." });
+                SendUnpackLog($"ERROR: Package file does not exist: {pkgPath}");
+                SendResponse("unpackResult", new { success = false, message = "Package file does not exist." });
                 return;
             }
 
@@ -1243,19 +1242,19 @@ public sealed class AppLogic
             outDir = Path.GetFullPath(outDir);
             Directory.CreateDirectory(outDir);
 
-            SendUnpackLog($"Начало распаковки пакета: {pkgPath}");
-            SendUnpackLog($"Папка распаковки: {outDir}");
+            SendUnpackLog($"Starting package unpacking: {pkgPath}");
+            SendUnpackLog($"Output directory: {outDir}");
 
             // 1. CNT entries (sce_sys)
-            SendUnpackLog("Распаковка записей CNT (метаданные sce_sys)...");
+            SendUnpackLog("Extracting CNT entries (sce_sys metadata)...");
             string sceSysDir = Path.Combine(outDir, "sce_sys");
             var cntFiles = ProsperoPackageArchive.ExtractCntEntries(pkgPath, sceSysDir, passcode, includeEncrypted: true);
-            SendUnpackLog($"Извлечено записей CNT: {cntFiles.Count}");
+            SendUnpackLog($"Extracted CNT entries: {cntFiles.Count}");
 
             // 2. Inner-PFS game files
-            SendUnpackLog("Декодирование NAPS и распаковка игровых файлов...");
+            SendUnpackLog("Decoding NAPS and extracting game files...");
             var innerFiles = ProsperoPackageArchive.ExtractInnerFiles(pkgPath, outDir, passcode, decompressFiles: true);
-            SendUnpackLog($"Извлечено файлов PFS: {innerFiles.Count}");
+            SendUnpackLog($"Extracted PFS files: {innerFiles.Count}");
 
             // 3. SI files if present
             using (var fs = File.OpenRead(pkgPath))
@@ -1263,19 +1262,19 @@ public sealed class AppLogic
                 var map = ProsperoPackageArchive.Inspect(fs);
                 if (map.SupplementSize > 0)
                 {
-                    SendUnpackLog("Распаковка отладочного сегмента SI...");
+                    SendUnpackLog("Extracting debug SI segment...");
                     string siDir = Path.Combine(outDir, "sce_si");
                     var siFiles = ProsperoPackageArchive.ExtractSiEntries(pkgPath, siDir);
-                    SendUnpackLog($"Извлечено файлов SI: {siFiles.Count}");
+                    SendUnpackLog($"Extracted SI files: {siFiles.Count}");
                 }
             }
 
             sw.Stop();
-            SendUnpackLog($"Распаковка успешно завершена за {sw.Elapsed}.");
+            SendUnpackLog($"Unpacking completed successfully in {sw.Elapsed}.");
             SendResponse("unpackResult", new
             {
                 success = true,
-                message = "Распаковка завершена",
+                message = "Unpacking complete",
                 outputDirectory = outDir,
                 elapsed = sw.Elapsed.ToString()
             });
@@ -1283,11 +1282,11 @@ public sealed class AppLogic
         catch (Exception ex)
         {
             sw.Stop();
-            SendUnpackLog($"ОШИБКА: {ex.Message}");
+            SendUnpackLog($"ERROR: {ex.Message}");
             SendResponse("unpackResult", new
             {
                 success = false,
-                message = $"Ошибка распаковки: {ex.Message}"
+                message = $"Unpacking error: {ex.Message}"
             });
         }
     }
