@@ -76,6 +76,12 @@ Verifies:
 
 ---
 
+## 📝 Release Notes
+
+See [RELEASE_NOTES.md](RELEASE_NOTES.md) for full changelogs and detailed patch notes for each version.
+
+---
+
 ## 📜 Credits & License
 
 - Built on top of `LibProsperoPkg` and `Photino.NET`.
