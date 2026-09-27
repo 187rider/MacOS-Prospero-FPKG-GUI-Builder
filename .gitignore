@@ -20,6 +20,7 @@ LibProsperoPkg.app/
 *.pkg
 *.zip
 *.tar.gz
+*.dmg
 
 # macOS system files
 .DS_Store
