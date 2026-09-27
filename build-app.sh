@@ -44,9 +44,9 @@ cat << 'EOF' > LibProsperoPkg.app/Contents/Info.plist
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.2.0</string>
+    <string>1.3.0</string>
     <key>CFBundleVersion</key>
-    <string>1.2.0</string>
+    <string>1.3.0</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
@@ -65,8 +65,8 @@ codesign --force --deep --sign - LibProsperoPkg.app
 codesign --verify --deep --strict --verbose=2 LibProsperoPkg.app
 
 echo "Creating DMG installer..."
-DMG_FILE="LibProsperoPkg-v1.2.0-$PLAT.dmg"
-ZIP_FILE="LibProsperoPkg-v1.2.0-$PLAT.app.zip"
+DMG_FILE="LibProsperoPkg-v1.3.0-$PLAT.dmg"
+ZIP_FILE="LibProsperoPkg-v1.3.0-$PLAT.app.zip"
 
 rm -rf dmg_staging "$DMG_FILE" "$ZIP_FILE"
 mkdir -p dmg_staging

@@ -2,6 +2,18 @@
 
 ---
 
+## [v1.3.0] — 2026-09-28
+
+### ⚡ Core Engine Upgrade to LibProsperoPkg v2.6.0
+- **Upstream v2.6.0 Integration**: Upgraded the core engine to the latest upstream release featuring improved PS5 package generation, enhanced mount key derivation, and data-first inner filesystem geometry reconstruction.
+- **100% Pure C# Zero-Dependency Graphics**: Completely eliminated external binary image libraries and multi-architecture native runtimes (`Magick.NET`, `BCnEncoder`, `CommunityToolkit.HighPerformance`, and `runtimes/`). Implemented native pure C# DX10 BC7 texture compression (`ProsperoDdsEncoder`) and direct PNG decoding (`ProsperoPngDecoder`), significantly reducing memory footprint and bundle complexity.
+- **High-Speed Suffix-Trie Kraken Matcher**: Integrated the upstream high-performance Suffix Trie dictionary matcher for Oodle Kraken compression, speeding up game asset compaction while ensuring full console bitstream compatibility.
+- **PS5 Structural Acceptance Gate Validator**: Overhauled the Quick Verification engine to run `ProsperoPkgValidator`, evaluating the exact structural gate preconditions enforced by the PS5 console mount path (FIH format version, PFS image boundaries, superblock ICV, and segment alignment).
+- **Modern End-to-End Package Extractor**: Replaced legacy archive extractors with `ProsperoPackageExtractor`, adding robust support for data-first inner images decoded via `naps_pkg_layout.dat`, Kraken/zlib PFSC containers, and automated outer metadata extraction.
+- **Preserved 64-Bit Addressing & Large-Game Protection**: Maintained full 64-bit inode addressing (`0x60` offset preservation) and pre-flight boundary extent checks across all inner PFS trees for flawless mounting of titles > 4 GiB.
+
+---
+
 ## [v1.2.0] — 2026-09-28
 
 ### 🚀 Native Apple Silicon (M-Series) Self-Contained Runtime

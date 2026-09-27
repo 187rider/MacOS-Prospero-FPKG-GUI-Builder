@@ -346,10 +346,6 @@ public sealed class AppLogic
                 _ => ProsperoPackageMode.Application
             };
 
-            var imageMode = imageModeStr == "plaintext"
-                ? ProsperoPublisherImageMode.PlaintextNoAuth
-                : ProsperoPublisherImageMode.Native;
-
             string cpuModeStr = root.TryGetProperty("cpuMode", out var cm) ? cm.GetString() ?? "cool" : "cool";
 
             // Set background/utility QoS on Darwin to keep system cool and prevent thermal throttling
@@ -362,13 +358,6 @@ public sealed class AppLogic
                 Thread.CurrentThread.Priority = ThreadPriority.BelowNormal;
             }
 
-            var innerComp = compressionStr.ToLowerInvariant() switch
-            {
-                "kraken" => ProsperoInnerCompression.Kraken,
-                "zlib" => ProsperoInnerCompression.Zlib,
-                _ => ProsperoInnerCompression.None
-            };
-
             int maxThreads = cpuModeStr switch
             {
                 "single" => 1,
@@ -378,29 +367,22 @@ public sealed class AppLogic
                 _ => Math.Min(4, Environment.ProcessorCount)
             };
 
-            // Exactly matching original fpkg-gui 2 ProsperoBuildOptions
+            // Modern LibProsperoPkg v2.6.0 ProsperoBuildOptions
             var options = new ProsperoBuildOptions
             {
                 SourceFolder = source,
                 OutputFolder = output,
                 ContentId = contentId,
-                PrimaryId = contentId,
                 TitleId = titleId,
                 Title = title,
                 Version = version,
                 Passcode = passcode,
                 Mode = mode,
-                InnerCompression = innerComp,
-                MaxHashingThreads = maxThreads,
                 OutputFormat = ProsperoOutputFormat.DebugImage,
-                UsePublisherPprNaps = true,
-                PlayGoChunkCount = Math.Max(1, chunks),
-                PublisherImageMode = imageMode,
-                DeterministicBuild = deterministic,
-                GenerateParamJsonIfMissing = true
+                GenerateParamJsonIfMissing = true,
+                FakeSignSelfModules = autoFself,
+                LicenseFree = true
             };
-
-            options.LicenseProvider ??= new LibProsperoPkg.PKG.FakeLicenseProvider();
 
             SendResponse("buildStarted", new { contentId, version });
 
@@ -441,7 +423,7 @@ public sealed class AppLogic
                 try
                 {
                     SendResponse("buildLog", new { log = "Verifying package checksum (SHA-256)...", timestamp = DateTime.Now.ToString("HH:mm:ss") });
-                    var v = VerifyPackageDirect(pkgPath, imageMode);
+                    var v = VerifyPackageDirect(pkgPath);
                     verifyResult = new
                     {
                         passed = true,
@@ -642,9 +624,8 @@ public sealed class AppLogic
                     pfsOffset = $"0x{pkg.Fih.PfsImageOffset:X16}",
                     pfsSize = pkg.Fih.PfsImageSize,
                     embeddedCntOffset = $"0x{pkg.Fih.EmbeddedCntOffset:X16}",
-                    innerBlocks = pkg.Fih.InnerImageBlockCount,
-                    metadataBlocks = pkg.Fih.MetadataBlockCount,
-                    napsSize = pkg.Fih.NapsLayoutSize
+                    formatVersion = pkg.Fih.FormatVersion,
+                    pfsSizeFormatted = FormatSize((long)pkg.Fih.PfsImageSize)
                 } : null,
                 header = pkg.Header != null ? new
                 {
@@ -680,8 +661,7 @@ public sealed class AppLogic
             }
 
             path = Path.GetFullPath(path);
-            var mode = imageMode == "plaintext" ? ProsperoPublisherImageMode.PlaintextNoAuth : ProsperoPublisherImageMode.Native;
-            var v = VerifyPackageDirect(path, mode);
+            var v = VerifyPackageDirect(path, imageMode);
 
             SendResponse("verifyResult", new
             {
@@ -821,38 +801,12 @@ public sealed class AppLogic
         return $"{bytes} bytes";
     }
 
-    private static byte[] ReadPkgEntryBytes(FileStream fs, long cntBaseOffset, ProsperoPkgEntry entry, string contentId, string passcode, bool publisherProfile)
+    private static byte[] ReadPkgEntryBytes(FileStream fs, long cntBaseOffset, ProsperoPkgEntry entry)
     {
-        long size = entry.Encrypted ? ((entry.DataSize + 15) & ~15L) : entry.DataSize;
+        long size = entry.DataSize;
         fs.Position = cntBaseOffset + entry.DataOffset;
         byte[] buffer = new byte[size];
         fs.ReadExactly(buffer);
-
-        if (entry.Encrypted && !string.IsNullOrWhiteSpace(passcode) && passcode.Length == 32)
-        {
-            try
-            {
-                var meta = new MetaEntry
-                {
-                    id = (EntryId)entry.RawId,
-                    NameTableOffset = entry.NameTableOffset,
-                    Flags1 = entry.Flags1,
-                    Flags2 = entry.Flags2,
-                    DataOffset = entry.DataOffset,
-                    DataSize = entry.DataSize
-                };
-                return Entry.Decrypt(buffer, contentId, passcode, meta, publisherProfile);
-            }
-            catch
-            {
-                return buffer;
-            }
-        }
-
-        if (buffer.Length != entry.DataSize)
-        {
-            Array.Resize(ref buffer, checked((int)entry.DataSize));
-        }
         return buffer;
     }
 
@@ -878,10 +832,10 @@ public sealed class AppLogic
             long fileLength = fi.Length;
 
             using var fs = File.OpenRead(pkgPath);
-            var map = ProsperoPackageArchive.Inspect(fs);
             var pkg = ProsperoPkgReader.Read(fs);
             long baseOffset = pkg.Fih != null ? (long)pkg.Fih.EmbeddedCntOffset : 0L;
-            bool publisherProfile = pkg.Entries.Any(e => e.RawId == 16 && e.DataSize >= 2944);
+            long outerPfsSize = pkg.Fih != null ? (long)pkg.Fih.PfsImageSize : 0L;
+            long cntSize = pkg.Header != null ? (long)pkg.Header.BodySize : 0L;
             string contentId = pkg.Header?.ContentId ?? "—";
 
             // param.json
@@ -905,7 +859,7 @@ public sealed class AppLogic
             var paramEntry = pkg.Entries.FirstOrDefault(e => e.Id == ProsperoEntryId.ParamJson || e.Name == "param.json");
             if (paramEntry != null)
             {
-                byte[] paramBytes = ReadPkgEntryBytes(fs, baseOffset, paramEntry, contentId, passcode, publisherProfile);
+                byte[] paramBytes = ReadPkgEntryBytes(fs, baseOffset, paramEntry);
                 try
                 {
                     using var pdoc = JsonDocument.Parse(paramBytes);
@@ -941,7 +895,7 @@ public sealed class AppLogic
             var playgoEntry = pkg.Entries.FirstOrDefault(e => e.Id == ProsperoEntryId.PlaygoManifestXml || e.Name == "playgo-manifest.xml");
             if (playgoEntry != null)
             {
-                byte[] xmlBytes = ReadPkgEntryBytes(fs, baseOffset, playgoEntry, contentId, passcode, publisherProfile);
+                byte[] xmlBytes = ReadPkgEntryBytes(fs, baseOffset, playgoEntry);
                 try
                 {
                     var doc = XDocument.Parse(Encoding.UTF8.GetString(xmlBytes));
@@ -969,7 +923,7 @@ public sealed class AppLogic
                 var chunkDatEntry = pkg.Entries.FirstOrDefault(e => e.Id == ProsperoEntryId.PlaygoChunkDat || e.Name == "playgo-chunk.dat");
                 if (chunkDatEntry != null)
                 {
-                    byte[] cBytes = ReadPkgEntryBytes(fs, baseOffset, chunkDatEntry, contentId, passcode, publisherProfile);
+                    byte[] cBytes = ReadPkgEntryBytes(fs, baseOffset, chunkDatEntry);
                     if (cBytes.Length >= 12 && cBytes[0] == (byte)'p' && cBytes[1] == (byte)'l' && cBytes[2] == (byte)'g')
                     {
                         scenarios = BinaryPrimitives.ReadUInt16LittleEndian(cBytes.AsSpan(8, 2));
@@ -982,7 +936,7 @@ public sealed class AppLogic
                 var scenarioJsonEntry = pkg.Entries.FirstOrDefault(e => e.Name == "playgo-scenario.json" || e.RawId == 0x00003000);
                 if (scenarioJsonEntry != null)
                 {
-                    byte[] sBytes = ReadPkgEntryBytes(fs, baseOffset, scenarioJsonEntry, contentId, passcode, publisherProfile);
+                    byte[] sBytes = ReadPkgEntryBytes(fs, baseOffset, scenarioJsonEntry);
                     try
                     {
                         using var sdoc = JsonDocument.Parse(sBytes);
@@ -1006,7 +960,7 @@ public sealed class AppLogic
             playgoSummary = $"{chunks} chunks / {scenarios} scenarios";
 
             // Segments
-            string segments = $"FIH 64.00 KiB (65,536 bytes); outer PFS {FormatSize(map.OuterPfsSize)} ({map.OuterPfsSize:N0} bytes); CNT {FormatSize(map.CntSize)} ({map.CntSize:N0} bytes); SI {FormatSize(map.SupplementSize)} ({map.SupplementSize:N0} bytes)";
+            string segments = $"FIH 64.00 KiB (65,536 bytes); outer PFS {FormatSize(outerPfsSize)} ({outerPfsSize:N0} bytes); CNT {FormatSize(cntSize)} ({cntSize:N0} bytes)";
             string pkgSize = $"{FormatSize(fileLength)} ({fileLength:N0} bytes)";
 
             // Artwork: Check pic0.png or icon0.png
@@ -1018,18 +972,10 @@ public sealed class AppLogic
             {
                 try
                 {
-                    byte[] imgBytes = ReadPkgEntryBytes(fs, baseOffset, coverEntry, contentId, passcode, publisherProfile);
+                    byte[] imgBytes = ReadPkgEntryBytes(fs, baseOffset, coverEntry);
                     if (imgBytes.Length > 8 && imgBytes[0] == 0x89 && imgBytes[1] == 0x50 && imgBytes[2] == 0x4E && imgBytes[3] == 0x47)
                     {
                         coverImageBase64 = "data:image/png;base64," + Convert.ToBase64String(imgBytes);
-                    }
-                    else if (imgBytes.Length > 4 && imgBytes[0] == (byte)'D' && imgBytes[1] == (byte)'D' && imgBytes[2] == (byte)'S')
-                    {
-                        using var magick = new ImageMagick.MagickImage(imgBytes);
-                        magick.Format = ImageMagick.MagickFormat.Png;
-                        using var ms = new MemoryStream();
-                        magick.Write(ms);
-                        coverImageBase64 = "data:image/png;base64," + Convert.ToBase64String(ms.ToArray());
                     }
                 }
                 catch { }
@@ -1079,129 +1025,41 @@ public sealed class AppLogic
                 return;
             }
 
-            SendUnpackLog("Quick verification of CNT structure, metadata, and digests without unpacking game data...");
+            pkgPath = Path.GetFullPath(pkgPath);
+            SendUnpackLog($"Running acceptance-gate verification: {pkgPath}");
 
-            using var fs = File.OpenRead(pkgPath);
-            var map = ProsperoPackageArchive.Inspect(fs);
-            var pkg = ProsperoPkgReader.Read(fs);
-            bool publisherProfile = pkg.Entries.Any(e => e.RawId == 16 && e.DataSize >= 2944);
-            string contentId = pkg.Header?.ContentId ?? "";
-
-            // 1. Package segment ranges and CNT structure
-            if (map.OuterPfsOffset < 65536 || map.OuterPfsSize <= 0)
+            var report = ProsperoPkgValidator.Validate(pkgPath);
+            int verifiedChecks = report.Checks.Count;
+            foreach (var check in report.Checks)
             {
-                throw new InvalidDataException("Invalid outer PFS segment geometry.");
-            }
-            if (map.CntOffset != map.OuterPfsOffset + map.OuterPfsSize)
-            {
-                throw new InvalidDataException("CNT offset does not follow outer PFS.");
-            }
-            SendUnpackLog("Package segment ranges and CNT structure are valid.");
-
-            // 2. FIH/CNT cross-references, rollup, package, descriptor, and game-image digests
-            if (pkg.Fih == null)
-            {
-                throw new InvalidDataException("Package has no FIH header.");
-            }
-            SendUnpackLog("FIH/CNT cross-references, rollup, package, descriptor, and game-image digests are valid.");
-
-            // 3. CNT header and entry digests
-            int verifiedEntries = pkg.Entries.Count;
-            SendUnpackLog($"CNT header and {verifiedEntries} entry digests are valid.");
-
-            // 4. PlayGo layout
-            int playgoChunks = 1;
-            int playgoScenarios = 1;
-            int playgoExtents = 1;
-            int playgoFiles = 1;
-            var manifestEntry = pkg.Entries.FirstOrDefault(e => e.Id == ProsperoEntryId.PlaygoManifestXml || e.Name == "playgo-manifest.xml");
-            if (manifestEntry != null)
-            {
-                long baseOffset = (long)pkg.Fih.EmbeddedCntOffset;
-                byte[] xmlBytes = ReadPkgEntryBytes(fs, baseOffset, manifestEntry, contentId, passcode, publisherProfile);
-                try
+                string statusIcon = check.Status switch
                 {
-                    var doc = XDocument.Parse(Encoding.UTF8.GetString(xmlBytes));
-                    var chunksElem = doc.Descendants("chunks").FirstOrDefault();
-                    if (chunksElem != null && int.TryParse(chunksElem.Attribute("count")?.Value, out int c)) playgoChunks = c;
-                    else playgoChunks = doc.Descendants("chunk").Count();
-                    if (playgoChunks == 0) playgoChunks = 1;
+                    ProsperoCheckStatus.Pass => "[PASS]",
+                    ProsperoCheckStatus.Warning => "[WARN]",
+                    _ => "[FAIL]"
+                };
+                SendUnpackLog($"{statusIcon} {check.Name}: {check.Detail}");
+            }
 
-                    var scElem = doc.Descendants("scenarios").FirstOrDefault();
-                    if (scElem != null && int.TryParse(scElem.Attribute("count")?.Value, out int s)) playgoScenarios = s;
-                    else playgoScenarios = doc.Descendants("scenario").Count();
-                    if (playgoScenarios == 0) playgoScenarios = 1;
-
-                    playgoExtents = doc.Descendants("extent").Count();
-                    if (playgoExtents == 0) playgoExtents = playgoChunks + 1;
-
-                    playgoFiles = doc.Descendants("file").Count();
-                    if (playgoFiles == 0) playgoFiles = verifiedEntries * 10 + 2;
-                }
-                catch { }
+            sw.Stop();
+            SendUnpackLog("Verification Summary:");
+            SendUnpackLog($"Total checks evaluated: {verifiedChecks}");
+            SendUnpackLog($"Elapsed time: {sw.Elapsed}");
+            if (report.Accepted)
+            {
+                SendUnpackLog("RESULT: No critical errors found. Package passes acceptance gate.");
             }
             else
             {
-                long baseOffset = (long)pkg.Fih.EmbeddedCntOffset;
-                var chunkDatEntry = pkg.Entries.FirstOrDefault(e => e.Id == ProsperoEntryId.PlaygoChunkDat || e.Name == "playgo-chunk.dat");
-                if (chunkDatEntry != null)
-                {
-                    byte[] cBytes = ReadPkgEntryBytes(fs, baseOffset, chunkDatEntry, contentId, passcode, publisherProfile);
-                    if (cBytes.Length >= 12 && cBytes[0] == (byte)'p' && cBytes[1] == (byte)'l' && cBytes[2] == (byte)'g')
-                    {
-                        playgoScenarios = BinaryPrimitives.ReadUInt16LittleEndian(cBytes.AsSpan(8, 2));
-                        playgoChunks = BinaryPrimitives.ReadUInt16LittleEndian(cBytes.AsSpan(10, 2));
-                        if (playgoChunks == 0) playgoChunks = 1;
-                        if (playgoScenarios == 0) playgoScenarios = 1;
-                    }
-                }
-                playgoExtents = playgoChunks + 1;
-                playgoFiles = verifiedEntries * 10 + 2;
+                SendUnpackLog("RESULT: Package failed acceptance gate verification.");
             }
-            SendUnpackLog($"PlayGo layout is valid ({playgoChunks} chunks, {playgoScenarios} scenarios, {playgoExtents} extents, {playgoFiles} file mappings).");
-
-            // 5. Outer-PFS superblock ICV
-            if (map.OuterSuperblockIndex >= 0)
-            {
-                long sbOffset = map.OuterPfsOffset + (long)map.OuterSuperblockIndex * 65536L;
-                fs.Position = sbOffset;
-                byte[] sb = new byte[65536];
-                fs.ReadExactly(sb);
-                byte[] actualIcv = ProsperoOuterPfsSignature.ComputeSuperblockIcv(sb);
-                byte[] expectedIcv = sb.AsSpan(896, 32).ToArray();
-                if (!actualIcv.AsSpan().SequenceEqual(expectedIcv))
-                {
-                    throw new InvalidDataException("Outer PFS superblock ICV mismatch.");
-                }
-            }
-            SendUnpackLog("Outer-PFS superblock ICV, NAPS layout, and inner-PFS inode metadata are valid.");
-
-            // 6. SI central directory
-            int siFiles = 0;
-            if (map.SupplementSize > 0)
-            {
-                fs.Position = map.SupplementOffset;
-                byte[] siBytes = new byte[Math.Min(map.SupplementSize, 64 * 1024 * 1024)];
-                fs.ReadExactly(siBytes);
-                using var mem = new MemoryStream(siBytes);
-                using var zip = new ZipArchive(mem, ZipArchiveMode.Read);
-                siFiles = zip.Entries.Count;
-            }
-            SendUnpackLog($"SI central directory is valid ({siFiles} files).");
-
-            // 7. Summary
-            sw.Stop();
-            SendUnpackLog("Verification Summary:");
-            SendUnpackLog($"Verified CNT entries: {verifiedEntries}");
-            SendUnpackLog($"Elapsed time: {sw.Elapsed}");
-            SendUnpackLog("RESULT: No errors found.");
 
             SendResponse("quickVerifyResult", new
             {
-                success = true,
-                message = "Quick verification passed",
+                success = report.Accepted,
+                message = report.Accepted ? "Quick verification passed" : "Quick verification failed",
                 elapsed = sw.Elapsed.ToString(),
-                entries = verifiedEntries
+                entries = verifiedChecks
             });
         }
         catch (Exception ex)
@@ -1245,29 +1103,45 @@ public sealed class AppLogic
             SendUnpackLog($"Starting package unpacking: {pkgPath}");
             SendUnpackLog($"Output directory: {outDir}");
 
-            // 1. CNT entries (sce_sys)
+            // 1. CNT entries (sce_sys metadata)
             SendUnpackLog("Extracting CNT entries (sce_sys metadata)...");
             string sceSysDir = Path.Combine(outDir, "sce_sys");
-            var cntFiles = ProsperoPackageArchive.ExtractCntEntries(pkgPath, sceSysDir, passcode, includeEncrypted: true);
-            SendUnpackLog($"Extracted CNT entries: {cntFiles.Count}");
-
-            // 2. Inner-PFS game files
-            SendUnpackLog("Decoding NAPS and extracting game files...");
-            var innerFiles = ProsperoPackageArchive.ExtractInnerFiles(pkgPath, outDir, passcode, decompressFiles: true);
-            SendUnpackLog($"Extracted PFS files: {innerFiles.Count}");
-
-            // 3. SI files if present
-            using (var fs = File.OpenRead(pkgPath))
+            Directory.CreateDirectory(sceSysDir);
+            int cntCount = 0;
+            try
             {
-                var map = ProsperoPackageArchive.Inspect(fs);
-                if (map.SupplementSize > 0)
+                using var fs = File.OpenRead(pkgPath);
+                var pkg = ProsperoPkgReader.Read(fs);
+                if (pkg.Fih != null && pkg.Entries.Count > 0)
                 {
-                    SendUnpackLog("Extracting debug SI segment...");
-                    string siDir = Path.Combine(outDir, "sce_si");
-                    var siFiles = ProsperoPackageArchive.ExtractSiEntries(pkgPath, siDir);
-                    SendUnpackLog($"Extracted SI files: {siFiles.Count}");
+                    long baseOffset = (long)pkg.Fih.EmbeddedCntOffset;
+                    foreach (var entry in pkg.Entries)
+                    {
+                        if (entry.DataSize <= 0) continue;
+                        string filename = !string.IsNullOrEmpty(entry.Name) ? entry.Name : $"entry_0x{entry.RawId:X8}.bin";
+                        string destFile = Path.Combine(sceSysDir, filename);
+                        byte[] entryBytes = ReadPkgEntryBytes(fs, baseOffset, entry);
+                        File.WriteAllBytes(destFile, entryBytes);
+                        cntCount++;
+                    }
                 }
             }
+            catch (Exception ex)
+            {
+                SendUnpackLog($"Notice extracting CNT metadata entries: {ex.Message}");
+            }
+            SendUnpackLog($"Extracted CNT metadata entries: {cntCount}");
+
+            // 2. Application filesystem via modern ProsperoPackageExtractor
+            SendUnpackLog("Extracting application filesystem...");
+            var options = new ProsperoExtractionOptions
+            {
+                ExtractOuterMetadata = true,
+                OuterMetadataSubdirectory = "_outer"
+            };
+            var key = ProsperoExtractionKey.FromPasscode(passcode);
+            var manifest = ProsperoPackageExtractor.Extract(pkgPath, outDir, key, options, log => SendUnpackLog(log));
+            SendUnpackLog($"Extracted {manifest.ExtractedFileCount} file(s) total ({manifest.Entries.Count} application files).");
 
             sw.Stop();
             SendUnpackLog($"Unpacking completed successfully in {sw.Elapsed}.");
@@ -1317,7 +1191,7 @@ public sealed class AppLogic
         string? SeedMarker,
         string Sha256);
 
-    private static PackageVerification VerifyPackageDirect(string packagePath, ProsperoPublisherImageMode expectedMode)
+    private static PackageVerification VerifyPackageDirect(string packagePath, string? expectedMode = null)
     {
         ProsperoPkgType? type = ProsperoPkgReader.DetectType(packagePath);
         using FileStream stream = new FileStream(packagePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4 * 1024 * 1024, FileOptions.SequentialScan);
@@ -1361,7 +1235,7 @@ public sealed class AppLogic
         stream.ReadExactly(seedBytes);
         string? seedMarker = null;
 
-        if (expectedMode == ProsperoPublisherImageMode.PlaintextNoAuth)
+        if (string.Equals(expectedMode, "plaintext", StringComparison.OrdinalIgnoreCase))
         {
             seedMarker = Encoding.ASCII.GetString(seedBytes);
             if (!string.Equals(seedMarker, "PPRPLAIN-NOAUTH!", StringComparison.Ordinal))
