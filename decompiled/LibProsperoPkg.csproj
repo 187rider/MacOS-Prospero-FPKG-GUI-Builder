@@ -1,0 +1,95 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>LibProsperoPkg</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>14.0</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+  </PropertyGroup>
+  <PropertyGroup>
+    <RootNamespace />
+  </PropertyGroup>
+  <ItemGroup>
+    <None Remove="LibProsperoPkg.Keys.Data.pkg_meta_rsa_key.pem" />
+    <None Remove="LibProsperoPkg.Keys.Data.passcode.bin" />
+    <None Remove="LibProsperoPkg.Keys.Data.mount_image.bin" />
+    <None Remove="LibProsperoPkg.Keys.Data.token.hex" />
+    <None Remove="LibProsperoPkg.PlayGo.Data.right.sprx" />
+    <EmbeddedResource Include="LibProsperoPkg.Keys.Data.pkg_meta_rsa_key.pem" LogicalName="LibProsperoPkg.Keys.Data.pkg_meta_rsa_key.pem" />
+    <EmbeddedResource Include="LibProsperoPkg.Keys.Data.passcode.bin" LogicalName="LibProsperoPkg.Keys.Data.passcode.bin" />
+    <EmbeddedResource Include="LibProsperoPkg.Keys.Data.mount_image.bin" LogicalName="LibProsperoPkg.Keys.Data.mount_image.bin" />
+    <EmbeddedResource Include="LibProsperoPkg.Keys.Data.token.hex" LogicalName="LibProsperoPkg.Keys.Data.token.hex" />
+    <EmbeddedResource Include="LibProsperoPkg.PlayGo.Data.right.sprx" LogicalName="LibProsperoPkg.PlayGo.Data.right.sprx" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.Text.RegularExpressions">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Text.RegularExpressions.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Collections">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Collections.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Text.Json">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Text.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Security.Cryptography">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Security.Cryptography.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Runtime.Numerics">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Runtime.Numerics.dll</HintPath>
+    </Reference>
+    <Reference Include="System.IO.MemoryMappedFiles">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.IO.MemoryMappedFiles.dll</HintPath>
+    </Reference>
+    <Reference Include="Magick.NET-Q8-AnyCPU">
+      <HintPath>../Magick.NET-Q8-AnyCPU.dll</HintPath>
+    </Reference>
+    <Reference Include="Magick.NET.Core">
+      <HintPath>../Magick.NET.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Diagnostics.Process">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Diagnostics.Process.dll</HintPath>
+    </Reference>
+    <Reference Include="System.IO.Compression">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.IO.Compression.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Threading.Tasks.Parallel">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Threading.Tasks.Parallel.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Xml.ReaderWriter">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Xml.ReaderWriter.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Xml.XmlSerializer">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Xml.XmlSerializer.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Linq">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Linq.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Memory">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Memory.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Text.Encoding.Extensions">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Text.Encoding.Extensions.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Runtime.InteropServices">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Runtime.InteropServices.dll</HintPath>
+    </Reference>
+    <Reference Include="BCnEncoder">
+      <HintPath>../BCnEncoder.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Text.Encodings.Web">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Text.Encodings.Web.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Threading">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Threading.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Console">
+      <HintPath>../../opt/homebrew/Cellar/dotnet/10.0.400/libexec/shared/Microsoft.NETCore.App/10.0.11/System.Console.dll</HintPath>
+    </Reference>
+    <Reference Include="CommunityToolkit.HighPerformance">
+      <HintPath>../CommunityToolkit.HighPerformance.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

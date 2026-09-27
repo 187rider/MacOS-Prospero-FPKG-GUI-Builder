@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LibProsperoPKG — PS5 Package Builder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Navigation Bar -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="3" width="20" height="14" rx="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-title">LibProsperoPKG</span>
+          <span class="brand-subtitle">PS5 Package Studio • macOS</span>
+        </div>
+      </div>
+
+      <nav class="nav-tabs" role="tablist">
+        <button class="nav-tab active" data-tab="build" id="tab-btn-build">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+          Build Package
+        </button>
+        <button class="nav-tab" data-tab="unpack-verify" id="tab-btn-unpack-verify">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
+          Распаковка и проверка
+        </button>
+        <button class="nav-tab" data-tab="inspect" id="tab-btn-inspect">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          Inspect PKG
+        </button>
+      </nav>
+
+      <div class="header-status">
+        <span class="status-indicator ready" id="global-status-dot"></span>
+        <span class="status-label" id="global-status-text">Ready</span>
+      </div>
+    </header>
+
+    <!-- Top Window Progress Bar Banner with Percentage -->
+    <div class="top-progress-bar-wrap" id="global-top-progress" style="display: none;">
+      <div class="top-progress-info">
+        <span class="top-progress-badge" id="top-progress-badge">Stage 1/5</span>
+        <span class="top-progress-desc" id="top-progress-desc">Preparing package build...</span>
+        <span class="top-progress-percent" id="top-progress-percent">0%</span>
+      </div>
+      <div class="top-progress-track">
+        <div class="top-progress-bar-fill" id="global-top-progress-fill" style="width: 0%;"></div>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <main class="app-main">
+      <!-- TAB 1: BUILD -->
+      <section class="tab-pane active" id="pane-build">
+        <div class="grid-layout">
+          <!-- Left Column: Inputs & Options -->
+          <div class="panel form-panel">
+            <div class="panel-header">
+              <h2>Package Configuration</h2>
+              <span class="badge" id="source-badge">No Folder Selected</span>
+            </div>
+
+            <!-- Source Folder Picker -->
+            <div class="form-group">
+              <label for="input-source">Source Directory (Project Folder)</label>
+              <div class="input-with-button">
+                <input type="text" id="input-source" placeholder="/path/to/my_ps5_game_or_app" spellcheck="false" autocomplete="off">
+                <button type="button" class="btn btn-secondary" id="btn-browse-source">Browse...</button>
+              </div>
+              <div class="metadata-banner" id="metadata-banner" style="display: none;">
+                <div class="metadata-info">
+                  <span class="meta-tag" id="meta-tag-param">param.json detected</span>
+                  <span class="meta-title" id="meta-title-text"></span>
+                  <span class="meta-playgo" id="meta-playgo-text"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Output Folder Picker -->
+            <div class="form-group">
+              <label for="input-output">Output Directory</label>
+              <div class="input-with-button">
+                <input type="text" id="input-output" placeholder="/path/to/output_folder" spellcheck="false" autocomplete="off">
+                <button type="button" class="btn btn-secondary" id="btn-browse-output">Browse...</button>
+              </div>
+            </div>
+
+            <!-- Parameters Grid -->
+            <div class="form-row">
+              <div class="form-group">
+                <label for="input-content-id">Content ID</label>
+                <input type="text" id="input-content-id" placeholder="UP0000-PPSA00000_00-0000000000000000" maxlength="36" spellcheck="false">
+              </div>
+              <div class="form-group">
+                <label for="input-version">Version</label>
+                <input type="text" id="input-version" placeholder="01.00" maxlength="5" spellcheck="false">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group flex-2">
+                <label for="input-title">Package Title</label>
+                <input type="text" id="input-title" placeholder="Application Title" spellcheck="false">
+              </div>
+              <div class="form-group flex-1">
+                <label for="select-mode">Mode</label>
+                <select id="select-mode">
+                  <option value="app" selected>Application (Game/App)</option>
+                  <option value="homebrew">Homebrew</option>
+                  <option value="dlc">Additional Content (DLC)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="select-image-mode">Outer Image Mode</label>
+                <select id="select-image-mode">
+                  <option value="plaintext" selected>Plaintext / No-Auth (PPRPLAIN-NOAUTH - Recommended for PS5 kstuff/FPKG)</option>
+                  <option value="native">Native (AES-XTS Encrypted)</option>
+                </select>
+              </div>
+              <div class="form-group flex-1">
+                <label for="select-compression">Inner Compression</label>
+                <select id="select-compression">
+                  <option value="none" selected>None (Raw PFSC)</option>
+                  <option value="kraken">Kraken (PFSv3)</option>
+                  <option value="zlib">Zlib (PFSC)</option>
+                </select>
+              </div>
+              <div class="form-group flex-small">
+                <label for="input-chunks">PlayGo Chunks</label>
+                <input type="number" id="input-chunks" value="1" min="1" max="16">
+              </div>
+              <div class="form-group flex-1">
+                <label for="select-cpu-mode">CPU & Thermal Profile</label>
+                <select id="select-cpu-mode">
+                  <option value="cool" selected>❄️ Cool & Quiet (2 Cores, Low Heat)</option>
+                  <option value="single">Single Core (Minimal CPU)</option>
+                  <option value="balanced">Balanced (4 Cores)</option>
+                  <option value="max">⚡ Max Speed (All Cores, High Heat)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Passcode & Toggles -->
+            <div class="form-row align-center">
+              <div class="form-group flex-2">
+                <label for="input-passcode">Passcode (32 characters)</label>
+                <input type="text" id="input-passcode" value="00000000000000000000000000000000" maxlength="32" spellcheck="false">
+              </div>
+              <div class="form-group checkbox-group flex-1">
+                <label class="checkbox-container" title="Recursively fake-sign decrypted ELFs (.bin, .elf, .prx, .sprx) using make_fself in Stage 0">
+                  <input type="checkbox" id="chk-fself" checked>
+                  <span class="checkmark"></span>
+                  Stage 0: FSELF
+                </label>
+                <label class="checkbox-container" title="Automatically patch requiredSystemSoftwareVersion to FW 1.00 in param.json to prevent CE-100005-6 / CE-107880-4">
+                  <input type="checkbox" id="chk-backport" checked>
+                  <span class="checkmark"></span>
+                  Backport (FW 1.00)
+                </label>
+                <label class="checkbox-container">
+                  <input type="checkbox" id="chk-deterministic" checked>
+                  <span class="checkmark"></span>
+                  Deterministic
+                </label>
+                <label class="checkbox-container">
+                  <input type="checkbox" id="chk-verify" checked>
+                  <span class="checkmark"></span>
+                  Auto-Verify
+                </label>
+              </div>
+            </div>
+
+            <!-- Build Action Button -->
+            <div class="actions-bar">
+              <button type="button" class="btn btn-primary btn-large" id="btn-build">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                <span>Build PS5 Package</span>
+              </button>
+              <button type="button" class="btn btn-danger btn-large" id="btn-cancel" style="display: none;">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                <span>Cancel Build</span>
+              </button>
+              <button type="button" class="btn btn-outline" id="btn-open-output" style="display: none;">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                Open in Finder
+              </button>
+            </div>
+          </div>
+
+          <!-- Right Column: Real-time Build Console -->
+          <div class="panel console-panel">
+            <div class="panel-header">
+              <div class="console-title">
+                <span class="terminal-dot red"></span>
+                <span class="terminal-dot yellow"></span>
+                <span class="terminal-dot green"></span>
+                <span>Build Output & Telemetry</span>
+              </div>
+              <div class="console-actions">
+                <button type="button" class="btn-icon" id="btn-copy-log" title="Copy Log">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                </button>
+                <button type="button" class="btn-icon" id="btn-clear-log" title="Clear Console">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Live Log Window -->
+            <div class="terminal" id="terminal-log">
+              <div class="log-entry system">[SYSTEM] Ready. Configure your package and click 'Build PS5 Package'.</div>
+            </div>
+
+            <!-- Build Result Banner -->
+            <div class="result-banner" id="build-result-banner" style="display: none;">
+              <div class="result-icon-container" id="result-status-icon"></div>
+              <div class="result-details">
+                <h4 id="result-title">Build Completed</h4>
+                <div class="result-metrics" id="result-metrics"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: INSPECT -->
+      <section class="tab-pane" id="pane-inspect">
+        <div class="panel single-panel">
+          <div class="panel-header">
+            <h2>Inspect PS5 Package Container</h2>
+            <div class="input-with-button file-picker-compact">
+              <input type="text" id="inspect-pkg-path" placeholder="Select or drop a .pkg file..." spellcheck="false">
+              <button type="button" class="btn btn-secondary" id="btn-browse-inspect">Browse PKG...</button>
+              <button type="button" class="btn btn-primary" id="btn-run-inspect">Inspect</button>
+            </div>
+          </div>
+
+          <div class="inspect-placeholder" id="inspect-placeholder">
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+            <p>Select a PS5 package file (.pkg) to inspect headers and entries</p>
+          </div>
+
+          <div class="inspect-results" id="inspect-results" style="display: none;">
+            <div class="cards-grid">
+              <div class="info-card">
+                <span class="card-label">Container Type</span>
+                <span class="card-value" id="card-pkg-type">-</span>
+              </div>
+              <div class="info-card">
+                <span class="card-label">Total Size</span>
+                <span class="card-value" id="card-pkg-size">-</span>
+              </div>
+              <div class="info-card">
+                <span class="card-label">Content ID</span>
+                <span class="card-value" id="card-content-id">-</span>
+              </div>
+              <div class="info-card">
+                <span class="card-label">Entries Count</span>
+                <span class="card-value" id="card-entries-count">-</span>
+              </div>
+            </div>
+
+            <!-- FIH / CNT Details Collapsible -->
+            <div class="metadata-details-box">
+              <div class="sub-headers-grid">
+                <div class="sub-header-block">
+                  <h4>FIH Header</h4>
+                  <ul class="kv-list" id="fih-kv-list"></ul>
+                </div>
+                <div class="sub-header-block">
+                  <h4>CNT Header</h4>
+                  <ul class="kv-list" id="cnt-kv-list"></ul>
+                </div>
+              </div>
+            </div>
+
+            <!-- Entries Table -->
+            <div class="table-container">
+              <div class="table-header">
+                <h3>Package Entries</h3>
+                <input type="text" id="filter-entries" placeholder="Filter entries by name or ID..." class="input-filter">
+              </div>
+              <table class="data-table" id="entries-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Name</th>
+                    <th>Entry ID</th>
+                    <th>Raw ID</th>
+                    <th>Data Offset</th>
+                    <th>Size</th>
+                    <th>Encrypted</th>
+                  </tr>
+                </thead>
+                <tbody id="entries-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: UNPACK & VERIFY (РАСПАКОВКА И ПРОВЕРКА) -->
+      <section class="tab-pane" id="pane-unpack-verify">
+        <div class="unpack-verify-layout">
+          <!-- Left Column: Settings & Package Information -->
+          <div class="unpack-left-col">
+            <!-- Group Box: Распаковка и проверка -->
+            <div class="group-box-container">
+              <div class="group-box-title">Распаковка и проверка</div>
+              <div class="group-box-content">
+                <div class="unpack-form-row">
+                  <label class="unpack-field-label">Файл PKG</label>
+                  <div class="unpack-field-input-wrap">
+                    <input type="text" id="unpack-pkg-path" placeholder="Выберите .pkg файл..." spellcheck="false">
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-browse-unpack-pkg">Выбрать...</button>
+                  </div>
+                </div>
+
+                <div class="unpack-form-row">
+                  <label class="unpack-field-label">Папка распаковки</label>
+                  <div class="unpack-field-input-wrap">
+                    <input type="text" id="unpack-out-dir" placeholder="Папка для распакованных файлов..." spellcheck="false">
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-browse-unpack-dir">Выбрать...</button>
+                  </div>
+                </div>
+
+                <div class="unpack-form-row">
+                  <label class="unpack-field-label">Passcode</label>
+                  <div class="unpack-field-input-wrap">
+                    <input type="password" id="unpack-passcode" value="00000000000000000000000000000000" maxlength="32" spellcheck="false" class="passcode-input">
+                    <button type="button" class="btn btn-secondary btn-sm btn-icon" id="btn-toggle-passcode" title="Показать/скрыть">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="unpack-btn-bar">
+                  <button type="button" class="btn btn-primary btn-sm" id="btn-run-quick-verify">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
+                    <span>Быстрая проверка</span>
+                  </button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-run-unpack">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    <span>Распаковать</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Group Box: Информация о пакете -->
+            <div class="group-box-container pkg-info-group">
+              <div class="group-box-title">Информация о пакете</div>
+              <div class="group-box-content pkg-info-body">
+                <div class="pkg-info-table-scroll">
+                  <table class="pkg-info-table">
+                    <tbody>
+                      <tr>
+                        <td class="info-label-cell">Название</td>
+                        <td class="info-value-cell bold-val" id="info-val-title">—</td>
+                      </tr>
+                      <tr>
+                        <td class="info-label-cell">Content ID</td>
+                        <td class="info-value-cell code-font" id="info-val-content-id">—</td>
+                      </tr>
+                      <tr>
+                        <td class="info-label-cell">Версия игры</td>
+                        <td class="info-value-cell" id="info-val-version">—</td>
+                      </tr>
+                      <tr>
+                        <td class="info-label-cell">Версия SDK</td>
+                        <td class="info-value-cell code-font" id="info-val-sdk">—</td>
+                      </tr>
+                      <tr>
+                        <td class="info-label-cell">Требования системы</td>
+                        <td class="info-value-cell code-font" id="info-val-sys-req">—</td>
+                      </tr>
+                      <tr>
+                        <td class="info-label-cell">Доступные языки</td>
+                        <td class="info-value-cell" id="info-val-languages">—</td>
+                      </tr>
+                      <tr>
+                        <td class="info-label-cell">Языки PlayGo</td>
+                        <td class="info-value-cell playgo-langs" id="info-val-playgo-languages">—</td>
+                      </tr>
+                      <tr>
+                        <td class="info-label-cell">PlayGo</td>
+                        <td class="info-value-cell" id="info-val-playgo">—</td>
+                      </tr>
+                      <tr>
+                        <td class="info-label-cell">Тип DRM</td>
+                        <td class="info-value-cell" id="info-val-drm">—</td>
+                      </tr>
+                      <tr>
+                        <td class="info-label-cell">Контейнер</td>
+                        <td class="info-value-cell" id="info-val-container">—</td>
+                      </tr>
+                      <tr>
+                        <td class="info-label-cell">Тип содержимого</td>
+                        <td class="info-value-cell" id="info-val-content-type">—</td>
+                      </tr>
+                      <tr>
+                        <td class="info-label-cell">Сегменты пакета</td>
+                        <td class="info-value-cell segments-cell" id="info-val-segments">—</td>
+                      </tr>
+                      <tr>
+                        <td class="info-label-cell">Размер PKG</td>
+                        <td class="info-value-cell" id="info-val-pkg-size">—</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <!-- Cover Artwork Preview Box -->
+                <div class="pkg-cover-art-container">
+                  <div class="pkg-cover-frame" id="pkg-cover-frame">
+                    <img id="pkg-cover-image" src="" alt="Cover Artwork" style="display: none;">
+                    <div class="pkg-cover-empty" id="pkg-cover-empty">
+                      <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                      <span>Нет обложки</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: Console Log -->
+          <div class="unpack-right-col">
+            <div class="group-box-container full-height-group">
+              <div class="group-box-title-row">
+                <div class="group-box-title">Журнал распаковки и проверки</div>
+                <div class="console-actions">
+                  <button type="button" class="btn-icon btn-sm" id="btn-copy-unpack-log" title="Копировать журнал">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  </button>
+                  <button type="button" class="btn-icon btn-sm" id="btn-clear-unpack-log" title="Очистить">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="group-box-content console-fill">
+                <div class="terminal unpack-terminal-log" id="unpack-terminal-log">
+                  <div class="log-entry system">[SYSTEM] Готово к распаковке и проверке. Выберите файл PKG.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom Status Bar Strip -->
+        <div class="unpack-bottom-status-strip">
+          <div class="unpack-status-bar-track">
+            <div class="unpack-status-bar-fill" id="unpack-status-bar-fill"></div>
+          </div>
+          <div class="unpack-status-text-label" id="unpack-status-text-label">Готово</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

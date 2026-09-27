@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>LibProsperoPkg.Gui</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Photino.NET" Version="4.0.16" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../decompiled/LibProsperoPkg.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="BCnEncoder">
+      <HintPath>../BCnEncoder.dll</HintPath>
+    </Reference>
+    <Reference Include="CommunityToolkit.HighPerformance">
+      <HintPath>../CommunityToolkit.HighPerformance.dll</HintPath>
+    </Reference>
+    <Reference Include="Magick.NET-Q8-AnyCPU">
+      <HintPath>../Magick.NET-Q8-AnyCPU.dll</HintPath>
+    </Reference>
+    <Reference Include="Magick.NET.Core">
+      <HintPath>../Magick.NET.Core.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../runtimes/**/*" LinkBase="runtimes" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="wwwroot/**/*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

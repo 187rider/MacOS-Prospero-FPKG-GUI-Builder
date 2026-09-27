@@ -1,0 +1,33 @@
+# Build & publish outputs
+bin/
+obj/
+publish/
+gui/publish/
+output/
+scratch/
+cli/
+LibProsperoPkg.dll
+LibProsperoPkg.pdb
+LibProsperoPkg.xml
+LibProsperoPkg.deps.json
+LibProsperoPkg.Gui.*
+
+
+# Compiled app bundle (built from source via build-app.sh)
+LibProsperoPkg.app/
+
+# Packages and dumps
+*.pkg
+*.zip
+*.tar.gz
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Temp files
+*.tmp
+*.log
+original_elf_headers.json
+fpkg-cli
