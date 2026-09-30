@@ -2,6 +2,15 @@
 
 ---
 
+## [v1.4.0] — 2026-09-30
+
+### 🛡️ Critical Fix: PS5 Kernel Mount & NAPS Layout Validation (`0x8001001d` / `0x8002006d`)
+- **Eliminated Consecutive / Empty RunBase Entries**: Resolved a kernel mount failure (`validate_layout: m_eStatus[0x8001001d], m_eSection[0xb], m_index[0x49102]`, `ppfs_ioctl_build_apr_metadata_naps() error=109 (0x6d)`, `sceFsBindPackages() ret = 8002006d`) in `WalkBlocks` (`ProsperoNapsLayoutBuilder.cs`).
+- **Ordered RunBase Generation**: Enforced strict `if ... else if` hierarchy so natural block run starts and 16-entry boundary markers take priority over cursor-preserving runs, guaranteeing zero empty runs and ensuring every 16th entry begins with a valid `RunBase`.
+- **Restored Complete PKG Engine Source**: Un-ignored `decompiled/LibProsperoPkg.PKG` in `.gitignore` which was previously masked by case-insensitive `*.pkg` pattern matching on macOS APFS filesystems.
+
+---
+
 ## [v1.2.0] — 2026-09-28
 
 ### 🚀 Native Apple Silicon (M-Series) Self-Contained Runtime
