@@ -2,6 +2,23 @@
 
 ---
 
+## [v1.6.0] — 2026-10-02
+
+### 🎯 Native macOS Drag & Drop Integration
+- **Objective-C Runtime Swizzling (`MacDragDropBridge`)**: Implemented a native AppKit bridge hooking `-[WKWebView performDragOperation:]` via `libobjc.A.dylib` to bypass WebKit sandbox limitations that stripped local filesystem paths from JavaScript drop events.
+- **Direct System Pasteboard Extraction**: Reads real filesystem paths directly from `NSPasteboard` (`[NSURL class]` and `NSFilenamesPboardType`) with cursor position mapping in window coordinates.
+- **Universal Drop Zones**: Native drag & drop fully operational for Source Directory (`#input-source`), Output Directory (`#input-output`), Inspect PKG (`#inspect-pkg-path`), Unpack PKG (`#unpack-pkg-path`), and Unpack Output (`#unpack-out-dir`), with visual glow pulse animations and automatic metadata scanning.
+
+### 🧩 Selective Fakelib Auto-Detection & Staging
+- **Dynamic Binary Dependency Scanning**: Automatically parses ELF dynamic headers of all game/app executables (`eboot.bin`, `*.prx`, `*.sprx`) to detect imported compatibility modules (`libSceAmpr.sprx`, `libSceAgc.sprx`, `libSceAgcDriver.sprx`, `libScePlayGo.sprx`, `libScePsml.sprx`).
+- **Selective Injection**: Only injects the exact fakelib stubs required by the target application rather than unconditionally copying all libraries, preventing runtime conflicts while ensuring firmware compatibility.
+- **Clean Lifecycle Management**: Preserves existing user libraries and automatically cleans up temporary staging artifacts post-build.
+
+### 📦 Native Packaging
+- **Deterministic Release Binaries**: Rebuilt self-contained native macOS `arm64` ReadyToRun bundle and signed DMG installer.
+
+---
+
 ## [v1.4.0] — 2026-09-30
 
 ### 🛡️ Critical Fix: PS5 Kernel Mount & NAPS Layout Validation (`0x8001001d` / `0x8002006d`)

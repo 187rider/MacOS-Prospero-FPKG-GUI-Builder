@@ -60,6 +60,9 @@ public sealed class ProsperoBuildOptions
 	/// <summary>When true a minimal <c>param.json</c> is generated if the source folder lacks one.</summary>
 	public bool GenerateParamJsonIfMissing { get; set; } = true;
 
+	/// <summary>When true disables staging aside any sce_sys or loose files (for already patched packages).</summary>
+	public bool DisableQuarantine { get; set; }
+
 	/// <summary>Cancellation token to abort the build.</summary>
 	public System.Threading.CancellationToken CancellationToken { get; set; } = System.Threading.CancellationToken.None;
 
@@ -205,7 +208,7 @@ public sealed class ProsperoBuildOptions
 	public bool RequirePublisherCompatibility { get; set; }
 
 	/// <summary>
-	/// Maximum number of CPU threads to use for outer block hashing (default: 2 to keep MacBook cool).
+	/// Maximum number of CPU threads to use for outer block hashing (default: 2 to maintain low CPU thermals).
 	/// </summary>
 	public int MaxHashingThreads { get; set; } = 2;
 }

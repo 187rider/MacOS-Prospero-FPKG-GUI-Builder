@@ -25,4 +25,16 @@ public sealed class FselfOptions
 	/// written twice in a synthesized publisher library record.
 	/// </summary>
 	public byte[]? SceVersionRecord { get; init; }
+
+	/// <summary>
+	/// Preserved or custom raw <c>.sceversion</c> trailer records to write at the end of the SELF.
+	/// When provided and the ELF has no <c>.sceversion</c> section, these records are appended.
+	/// </summary>
+	public byte[]? SceVersionRecords { get; init; }
+
+	/// <summary>Forces legacy Orbis FSELF container (magic 0x1D3D154F), required for PS5 FW 3.xx-4.xx jailbreak.</summary>
+	public bool UseOrbisContainer { get; init; }
+
+	/// <summary>SELF program type (default: 268435713u / 0x10000101 for app, or 0x00000101 for Orbis).</summary>
+	public uint ProgramType { get; init; } = 268435713u;
 }

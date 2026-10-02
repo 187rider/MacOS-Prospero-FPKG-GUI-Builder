@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 
 namespace LibProsperoPkg.Content;
 
@@ -184,7 +185,7 @@ public static class ProsperoFself
 		return false;
 	}
 
-	private static ReadOnlySpan<byte> GetSceVersionRecords(byte[] image)
+	public static ReadOnlySpan<byte> GetSceVersionRecords(byte[] image)
 	{
 		if (IsElf(image))
 		{
@@ -192,6 +193,33 @@ public static class ProsperoFself
 		}
 		if (IsSelf(image))
 		{
+			if (image.Length >= 32)
+			{
+				ushort numSegs = BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(24, 2));
+				long maxSegEnd = 0;
+				for (int i = 0; i < numSegs && 32 + (i + 1) * 32 <= image.Length; i++)
+				{
+					long off = (long)BinaryPrimitives.ReadUInt64LittleEndian(image.AsSpan(32 + i * 32 + 8, 8));
+					long sz = (long)BinaryPrimitives.ReadUInt64LittleEndian(image.AsSpan(32 + i * 32 + 16, 8));
+					if (off + sz > maxSegEnd) maxSegEnd = off + sz;
+				}
+				if (maxSegEnd > 0 && maxSegEnd < image.Length)
+				{
+					for (int pad = 0; pad < 32 && maxSegEnd + pad + 5 <= image.Length; pad++)
+					{
+						int pos = (int)maxSegEnd + pad;
+						if (image[pos] == 0 && image[pos + 1] == 0)
+						{
+							ushort len = BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(pos + 2, 2));
+							if (len >= 17 && image[pos + 4] == 8 && pos + 4 + len <= image.Length)
+							{
+								return image.AsSpan(pos);
+							}
+						}
+					}
+				}
+			}
+
 			ulong num = BinaryPrimitives.ReadUInt64LittleEndian(image.AsSpan(16));
 			if (num <= (ulong)image.LongLength)
 			{
@@ -316,12 +344,14 @@ public static class ProsperoFself
 		{
 			throw new ArgumentException("The ELF has no loadable segment content.", "elf");
 		}
+		bool isOrbisContainer = options.UseOrbisContainer || (options.FirmwareVersion > 0 && options.FirmwareVersion < 0x0500000000000000uL);
 		int num5 = list.Count * 2;
 		int num6 = 32 + num5 * 32;
 		int num7 = 64 + num4 * 56;
 		int num8 = AlignUp(num6 + num7, 16);
 		int num9 = num8 + 64 + 48;
-		int num10 = checked(num5 * 80 + 80 + 544);
+		int sigSize = isOrbisContainer ? 256 : 544;
+		int num10 = checked(num5 * 80 + 80 + sigSize);
 		int num11 = num9 + num10;
 		if (num9 > 65535 || num10 > 65535)
 		{
@@ -343,8 +373,12 @@ public static class ProsperoFself
 				num12 = AlignUp(num12, 16);
 			}
 		}
-		int num13 = num12;
+		int num13 = AlignUp(num12, 16);
 		ReadOnlySpan<byte> readOnlySpan = FindElfSection(elf, ".sceversion");
+		if (readOnlySpan.IsEmpty && options.SceVersionRecords != null && options.SceVersionRecords.Length > 0)
+		{
+			readOnlySpan = options.SceVersionRecords;
+		}
 		byte[] array3 = null;
 		if (readOnlySpan.IsEmpty && !string.IsNullOrWhiteSpace(options.SceVersionName))
 		{
@@ -357,17 +391,20 @@ public static class ProsperoFself
 		ReadOnlySpan<byte> readOnlySpan2 = ((array3 == null) ? readOnlySpan : ((ReadOnlySpan<byte>)array3));
 		byte[] array4 = new byte[checked(num13 + readOnlySpan2.Length)];
 		Span<byte> span = array4.AsSpan();
-		BinaryPrimitives.WriteUInt32LittleEndian(span, 4009038932u);
-		span[4] = 16;
+		uint magic = isOrbisContainer ? 490542415u : 4009038932u;
+		BinaryPrimitives.WriteUInt32LittleEndian(span, magic);
+		span[4] = (byte)(isOrbisContainer ? 0 : 16);
 		span[5] = 1;
 		span[6] = 1;
 		span[7] = 18;
-		BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(8), 268435713u);
+		uint ptype = isOrbisContainer ? (options.ProgramType & 0xFFFFu) : options.ProgramType;
+		BinaryPrimitives.WriteUInt32LittleEndian(span.Slice(8), ptype);
 		BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(12), (ushort)num9);
 		BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(14), (ushort)num10);
 		BinaryPrimitives.WriteUInt64LittleEndian(span.Slice(16), (ulong)num13);
 		BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(24), (ushort)num5);
-		BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(26), 50);
+		ushort flagsValue = (ushort)(isOrbisContainer ? 0x0022 : 50);
+		BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(26), flagsValue);
 		for (int j = 0; j < list.Count; j++)
 		{
 			int entry = 32 + j * 2 * 32;
@@ -378,7 +415,10 @@ public static class ProsperoFself
 			WriteSegment(span, entry2, flags2, (ulong)array[j * 2 + 1], (ulong)list[j].FileSize, (ulong)list[j].FileSize);
 		}
 		elf.AsSpan(0, num7).CopyTo(span.Slice(num6));
-		ulong value = options.AuthorityId ?? DeriveAuthorityId(elf, eType);
+		ulong defaultAuthority = isOrbisContainer
+			? (eType == 2 ? 3530822107858473218uL : 3530822107858473217uL)
+			: DeriveAuthorityId(elf, eType);
+		ulong value = options.AuthorityId ?? defaultAuthority;
 		BinaryPrimitives.WriteUInt64LittleEndian(span.Slice(num8), value);
 		BinaryPrimitives.WriteUInt64LittleEndian(span.Slice(num8 + 8), 1uL);
 		BinaryPrimitives.WriteUInt64LittleEndian(span.Slice(num8 + 16), options.AppVersion);
@@ -509,19 +549,514 @@ public static class ProsperoFself
 	}
 
 	/// <summary>
+	/// In-place down-patches .sceversion records within a byte span to the target SDK version.
+	/// </summary>
+	public static void PatchSceVersionRecordsSpan(Span<byte> records, ulong targetSdk)
+	{
+		byte targetMajor = (byte)(targetSdk >> 56);
+		byte targetMinor = (byte)(targetSdk >> 48);
+
+		int i = 0;
+		while (i + 4 <= records.Length)
+		{
+			int len = BinaryPrimitives.ReadUInt16LittleEndian(records.Slice(i + 2, 2));
+			int recordLen = len + 4;
+			if (len < 17 || i + recordLen > records.Length)
+			{
+				break;
+			}
+			int nameLen = len - 17;
+			int v1Off = i + 5 + nameLen;
+			int v2Off = v1Off + 8;
+			if (v2Off + 8 <= records.Length)
+			{
+				byte curMajor = records[v1Off];
+				byte curMinor = records[v1Off + 1];
+				if (curMajor > targetMajor || (curMajor == targetMajor && curMinor > targetMinor))
+				{
+					records[v1Off] = targetMajor;
+					records[v1Off + 1] = targetMinor;
+					records[v2Off] = targetMajor;
+					records[v2Off + 1] = targetMinor;
+				}
+			}
+			i += recordLen;
+		}
+	}
+
+	/// <summary>
+	/// Returns a copy of the .sceversion records buffer with all records down-patched to the target SDK.
+	/// </summary>
+	public static byte[] PatchSceVersionRecords(byte[] records, ulong targetSdk)
+	{
+		if (records == null || records.Length == 0) return Array.Empty<byte>();
+		byte[] copy = (byte[])records.Clone();
+		PatchSceVersionRecordsSpan(copy.AsSpan(), targetSdk);
+		return copy;
+	}
+
+	/// <summary>
+	/// Searches for the .sceversion section in an ELF image and down-patches its records in place.
+	/// </summary>
+	public static bool PatchElfSceVersionSection(byte[] elf, ulong targetSdk)
+	{
+		if (!IsElf(elf) || elf.Length < 64) return false;
+		ulong shoff = BinaryPrimitives.ReadUInt64LittleEndian(elf.AsSpan(40, 8));
+		int shentsize = BinaryPrimitives.ReadUInt16LittleEndian(elf.AsSpan(58, 2));
+		int shnum = BinaryPrimitives.ReadUInt16LittleEndian(elf.AsSpan(60, 2));
+		int shstrndx = BinaryPrimitives.ReadUInt16LittleEndian(elf.AsSpan(62, 2));
+
+		if (shoff == 0 || shnum == 0 || shentsize < 64 || shstrndx >= shnum || shoff > (ulong)int.MaxValue)
+			return false;
+
+		int shTableStart = (int)shoff;
+		if (shTableStart + (long)shnum * shentsize > elf.Length) return false;
+
+		int strHeader = shTableStart + shstrndx * shentsize;
+		ulong strOffset = BinaryPrimitives.ReadUInt64LittleEndian(elf.AsSpan(strHeader + 24, 8));
+		ulong strSize = BinaryPrimitives.ReadUInt64LittleEndian(elf.AsSpan(strHeader + 32, 8));
+		if (strOffset + strSize > (ulong)elf.Length) return false;
+
+		ReadOnlySpan<byte> shstrtab = elf.AsSpan((int)strOffset, (int)strSize);
+		byte[] targetName = Encoding.ASCII.GetBytes(".sceversion");
+
+		for (int i = 0; i < shnum; i++)
+		{
+			int entryOff = shTableStart + i * shentsize;
+			uint nameIdx = BinaryPrimitives.ReadUInt32LittleEndian(elf.AsSpan(entryOff, 4));
+			if (nameIdx >= (uint)shstrtab.Length) continue;
+
+			ReadOnlySpan<byte> nameSpan = shstrtab.Slice((int)nameIdx);
+			int nullIdx = nameSpan.IndexOf((byte)0);
+			if (nullIdx >= 0) nameSpan = nameSpan.Slice(0, nullIdx);
+
+			if (nameSpan.SequenceEqual(targetName))
+			{
+				ulong secOffset = BinaryPrimitives.ReadUInt64LittleEndian(elf.AsSpan(entryOff + 24, 8));
+				ulong secSize = BinaryPrimitives.ReadUInt64LittleEndian(elf.AsSpan(entryOff + 32, 8));
+				if (secOffset + secSize <= (ulong)elf.Length && secSize > 0)
+				{
+					PatchSceVersionRecordsSpan(elf.AsSpan((int)secOffset, (int)secSize), targetSdk);
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/// <summary>
+	/// Scans the ELF for embedded Sony process/module param blocks (PT_SCE_PROCPARAM 0x3C13F4BF and "ORBI")
+	/// and down-patches their SDK version fields.
+	/// </summary>
+	public static int PatchElfProcParam(Span<byte> elf, ulong targetSdk)
+	{
+		if (elf.Length < 64) return 0;
+		int count = 0;
+		byte targetMajor = (byte)(targetSdk >> 56);
+		byte targetMinor = (byte)(targetSdk >> 48);
+
+		ReadOnlySpan<byte> procParamNeedle = stackalloc byte[] { 0xBF, 0xF4, 0x13, 0x3C }; // 0x3C13F4BF
+		ReadOnlySpan<byte> orbiNeedle = stackalloc byte[] { 0x4F, 0x52, 0x42, 0x49 }; // "ORBI"
+
+		static void PatchParamAt(Span<byte> target, int matchPos, byte targetMajor, byte targetMinor)
+		{
+			if (matchPos + 16 <= target.Length)
+			{
+				if (targetMajor <= 4)
+				{
+					target[matchPos + 10] = 0x04;
+					target[matchPos + 11] = 0x09;
+					target[matchPos + 12] = 0x31;
+					target[matchPos + 13] = 0x00;
+					target[matchPos + 14] = 0x00;
+					target[matchPos + 15] = 0x04;
+				}
+				else
+				{
+					target[matchPos + 10] = targetMajor;
+					target[matchPos + 11] = targetMinor;
+					target[matchPos + 12] = 0x00;
+					target[matchPos + 13] = 0x00;
+					target[matchPos + 14] = targetMinor;
+					target[matchPos + 15] = targetMajor;
+				}
+			}
+		}
+
+		int pos = 0;
+		while (pos + 16 <= elf.Length)
+		{
+			int idx = elf.Slice(pos).IndexOf(procParamNeedle);
+			if (idx < 0) break;
+			PatchParamAt(elf, pos + idx, targetMajor, targetMinor);
+			count++;
+			pos += idx + 4;
+		}
+
+		pos = 0;
+		while (pos + 16 <= elf.Length)
+		{
+			int idx = elf.Slice(pos).IndexOf(orbiNeedle);
+			if (idx < 0) break;
+			PatchParamAt(elf, pos + idx, targetMajor, targetMinor);
+			count++;
+			pos += idx + 4;
+		}
+
+		return count;
+	}
+
+	/// <summary>
+	/// Detects and bypasses hardware AMPR / APR streaming verification checks in executable ELFs,
+	/// allowing games targeting FW 7.xx-8.xx hardware compression to run on FW 3.xx-4.xx.
+	/// </summary>
+	public static int PatchElfAmprBypass(Span<byte> elf, Action<string>? logger = null)
+	{
+		if (elf.Length < 64) return 0;
+		ReadOnlySpan<byte> prefix = stackalloc byte[] { 0x48, 0x8D, 0x75, 0xE4, 0xE8 };
+		ReadOnlySpan<byte> suffix = stackalloc byte[] { 0x85, 0xC0, 0x75, 0x08, 0x83, 0x7D, 0xE4, 0x02, 0xB0, 0x01, 0x74 };
+		int count = 0;
+		int pos = 0;
+
+		while (pos + 25 <= elf.Length)
+		{
+			int idx = elf.Slice(pos).IndexOf(prefix);
+			if (idx < 0) break;
+			int matchPos = pos + idx;
+			if (matchPos + 20 <= elf.Length && elf.Slice(matchPos + 9, suffix.Length).SequenceEqual(suffix))
+			{
+				// Replace call (e8 ?? ?? ?? ??) with jmp +12 (e9 0c 00 00 00)
+				elf[matchPos + 4] = 0xE9;
+				elf[matchPos + 5] = 0x0C;
+				elf[matchPos + 6] = 0x00;
+				elf[matchPos + 7] = 0x00;
+				elf[matchPos + 8] = 0x00;
+				count++;
+				logger?.Invoke($"[stage 0/5] [Backport] Bypassed hardware AMPR stream check at offset 0x{matchPos + 4:X}");
+			}
+			pos = matchPos + 5;
+		}
+		return count;
+	}
+
+	/// <summary>
+	/// In-place down-patches known SDK 5.xx+ symbol versions to SDK 4.xx equivalents in the ELF dynamic string table
+	/// (e.g. libSceAmpr sceAmprInitialize '86f0wFtxn0k#u#s' -> '04AjkP0jO9U#v#G').
+	/// </summary>
+	public static int PatchElfSymbolVersions(Span<byte> elf, ulong targetSdkVersion, Action<string>? logger = null)
+	{
+		if (elf.Length < 64 || targetSdkVersion == 0 || targetSdkVersion >= 0x0500000000000000uL) return 0;
+		int count = 0;
+
+		ReadOnlySpan<byte> amprInitSdk5 = "86f0wFtxn0k#u#s"u8;
+		ReadOnlySpan<byte> amprInitSdk4 = "04AjkP0jO9U#v#G"u8;
+
+		int pos = 0;
+		while (pos + amprInitSdk5.Length <= elf.Length)
+		{
+			int idx = elf.Slice(pos).IndexOf(amprInitSdk5);
+			if (idx < 0) break;
+			int matchPos = pos + idx;
+			amprInitSdk4.CopyTo(elf.Slice(matchPos, amprInitSdk4.Length));
+			count++;
+			logger?.Invoke($"[stage 0/5] [Backport] Patched libSceAmpr symbol version at offset 0x{matchPos:X} (86f0wFtxn0k#u#s -> 04AjkP0jO9U#v#G)");
+			pos = matchPos + amprInitSdk5.Length;
+		}
+
+		ReadOnlySpan<byte> libcSymSdk5 = "4h6F1LLbTiw#A#B"u8;
+		ReadOnlySpan<byte> libcSymSdk4 = "IWIBBdTHit4#A#B"u8;
+
+		pos = 0;
+		while (pos + libcSymSdk5.Length <= elf.Length)
+		{
+			int idx = elf.Slice(pos).IndexOf(libcSymSdk5);
+			if (idx < 0) break;
+			int matchPos = pos + idx;
+			libcSymSdk4.CopyTo(elf.Slice(matchPos, libcSymSdk4.Length));
+			count++;
+			logger?.Invoke($"[stage 0/5] [Backport] Patched libc symbol version at offset 0x{matchPos:X} (4h6F1LLbTiw#A#B -> IWIBBdTHit4#A#B)");
+			pos = matchPos + libcSymSdk5.Length;
+		}
+
+		return count;
+	}
+
+	/// <summary>
+	/// In-place patches executable binary instructions for FW 3.xx-4.xx backport compatibility:
+	/// 1) NOPs unsupported SDK 5+ user-service privacy calls: BE 01 00 00 00 4C 89 F7 E8 ?? ?? ?? ?? 8B 3D
+	/// 2) Fixes libc.prx buffer/stack alignment: BA 03 00 00 00 B9 00 80 00 00 -> BA 03 00 00 00 31 C9 90 90 90
+	/// 3) Inlines missing SDK 7.xx/8.xx NID stubs and redirects unresolvable GOT entries
+	/// 4) Fixes engine compatibility flags (cmovne and config initialization fields)
+	/// </summary>
+	public static int PatchElfExecutableBackport(Span<byte> elf, ulong targetSdkVersion, Action<string>? logger = null)
+	{
+		if (elf.Length < 64 || targetSdkVersion == 0 || targetSdkVersion >= 0x0500000000000000uL) return 0;
+		int count = 0;
+
+		// 1. libc.prx page/stack size alignment patch: BA 03 00 00 00 B9 00 80 00 00 -> BA 03 00 00 00 31 C9 90 90 90
+		ReadOnlySpan<byte> libcPageNeedle = stackalloc byte[] { 0xBA, 0x03, 0x00, 0x00, 0x00, 0xB9, 0x00, 0x80, 0x00, 0x00 };
+		int pos = 0;
+		while (pos + libcPageNeedle.Length <= elf.Length)
+		{
+			int idx = elf.Slice(pos).IndexOf(libcPageNeedle);
+			if (idx < 0) break;
+			int matchPos = pos + idx;
+			elf[matchPos + 5] = 0x31;
+			elf[matchPos + 6] = 0xC9;
+			elf[matchPos + 7] = 0x90;
+			elf[matchPos + 8] = 0x90;
+			elf[matchPos + 9] = 0x90;
+			count++;
+			logger?.Invoke($"[stage 0/5] [Backport] Patched libc buffer/stack size constraint at offset 0x{matchPos + 5:X}");
+			pos = matchPos + libcPageNeedle.Length;
+		}
+
+		// 2. High-SDK engine backport suite (NID stubs + GOT redirections + engine config flags)
+		ReadOnlySpan<byte> extendedSignature = "NH6xARDOVv8"u8;
+		if (elf.IndexOf(extendedSignature) >= 0)
+		{
+			(int Offset, string OrigHex, string ReplHex)[] extendedPatches =
+			{
+				(0x40c1, "cccccccccccccccccccccccccccccc", "31c0c707020000008906c390909090"),
+				(0x4231, "cccccc", "31c0c3"),
+				(0x4681, "cccccccccccc", "b81c002980c3"),
+				(0x5996, "cccccccccccccccccc", "50e88403f20559eb02"),
+				(0x59a1, "cccccccccccccccccccccccccc", "3d01802680750231c0c331c0c3"),
+				(0xbff1, "cccccccccccc", "b808009f80c3"),
+				(0x11471, "cccccccccccccccccccccccc", "57e8a940f10559e904060000"),
+				(0x11a81, "cccccccccccccccccccccccccc", "3d00009f807505e924bb0000c3"),
+				(0x1d4fb, "e8", "90"),
+				(0x1d4fd, "8af005", "909090"),
+				(0x1d5b1, "cccccccccccccccccccccccccccccc", "e30c48837908007405e9a2120000c3"),
+				(0x1e861, "cccccccccccccccccccccccccc", "48837910007505b808009f80c3"),
+				(0x45831, "cccccccccccccccccccccccccccccc", "31c083fe040f95c001c0488907eb01"),
+				(0x45841, "cccccccccccccccccccccccccccc", "6a01baffffff7f6a035e31c9eb02"),
+				(0x45851, "cccccccccccccccccccccccccccc", "4531c04183c9ffe8e30bee0558c3"),
+				(0x1e1a2c, "f042d405", "663fe2ff"),
+				(0x1e326e, "0f45c2", "909090"),
+				(0xdc8552, "eade1505", "dbd227ff"),
+				(0xdc86e5, "57dd1505", "48d127ff"),
+				(0x385155a, "e8811f6d02", "e90c000000"),
+				(0x3851579, "e8621f6d02", "e90c000000"),
+				(0x3851598, "e8431f6d02", "e90c000000"),
+				(0x38515b7, "e8241f6d02", "e90c000000"),
+				(0x3f94b2c, "f009f901", "41c907fc"),
+				(0x3f94ba2, "ffffffff", "00000000"),
+				(0x3f94c34, "02", "00"),
+				(0x980ee38, "96f6f105", "c1000000"),
+				(0x980fc58, "d612f205", "31020000"),
+				(0x980fc90, "4613f205", "81060000"),
+				(0x980fd80, "2615f205", "f17f0000"),
+				(0x9810180, "261df205", "ab190000")
+			};
+
+			int extendedCount = 0;
+			foreach (var patch in extendedPatches)
+			{
+				byte[] orig = Convert.FromHexString(patch.OrigHex);
+				byte[] repl = Convert.FromHexString(patch.ReplHex);
+				int targetOffset = patch.Offset;
+				if (targetOffset + orig.Length <= elf.Length && elf.Slice(targetOffset, orig.Length).SequenceEqual(orig))
+				{
+					repl.CopyTo(elf.Slice(targetOffset, repl.Length));
+					extendedCount++;
+				}
+				else
+				{
+					int winStart = Math.Max(0, targetOffset - 4096);
+					int winLen = Math.Min(elf.Length - winStart, 8192);
+					int found = elf.Slice(winStart, winLen).IndexOf(orig);
+					if (found >= 0)
+					{
+						repl.CopyTo(elf.Slice(winStart + found, repl.Length));
+						extendedCount++;
+					}
+				}
+			}
+			logger?.Invoke($"[stage 0/5] [Backport] Applied {extendedCount} native NID stub, GOT redirection, and compatibility patches.");
+			count += extendedCount;
+			return count;
+		}
+
+		// 3. Generic fallback patches for other titles
+		// UserService privacy call (BE 01 00 00 00 4C 89 F7 E8 ?? ?? ?? ?? 8B 3D) -> 5 NOPs
+		ReadOnlySpan<byte> privPrefix = stackalloc byte[] { 0xBE, 0x01, 0x00, 0x00, 0x00, 0x4C, 0x89, 0xF7, 0xE8 };
+		ReadOnlySpan<byte> privSuffix = stackalloc byte[] { 0x8B, 0x3D };
+		pos = 0;
+		while (pos + 16 <= elf.Length)
+		{
+			int idx = elf.Slice(pos).IndexOf(privPrefix);
+			if (idx < 0) break;
+			int matchPos = pos + idx;
+			if (matchPos + 15 <= elf.Length && elf.Slice(matchPos + 13, 2).SequenceEqual(privSuffix))
+			{
+				elf.Slice(matchPos + 8, 5).Fill(0x90);
+				count++;
+				logger?.Invoke($"[stage 0/5] [Backport] Bypassed unsupported UserService privacy call at offset 0x{matchPos + 8:X}");
+			}
+			pos = matchPos + 9;
+		}
+
+		// Engine compatibility flags (cmovne)
+		ReadOnlySpan<byte> cmovneNeedle = stackalloc byte[] { 0x80, 0x7D, 0x10, 0x00, 0x0F, 0x45, 0xC2, 0x31, 0xD2, 0x41, 0x89, 0x45, 0x08 };
+		pos = 0;
+		while (pos + cmovneNeedle.Length <= elf.Length)
+		{
+			int idx = elf.Slice(pos).IndexOf(cmovneNeedle);
+			if (idx < 0) break;
+			int matchPos = pos + idx;
+			elf.Slice(matchPos + 4, 3).Fill(0x90);
+			count++;
+			logger?.Invoke($"[stage 0/5] [Backport] Patched conditional engine flag at offset 0x{matchPos + 4:X}");
+			pos = matchPos + cmovneNeedle.Length;
+		}
+
+		// Generic fallback AMPR status call (4C 89 A5 78 FA FF FF E8 ?? ?? ?? ?? 3D 08 00 9F 80 74) -> B8 08 00 9F 80
+		ReadOnlySpan<byte> amprStatPrefix = stackalloc byte[] { 0x4C, 0x89, 0xA5, 0x78, 0xFA, 0xFF, 0xFF, 0xE8 };
+		ReadOnlySpan<byte> amprStatSuffix = stackalloc byte[] { 0x3D, 0x08, 0x00, 0x9F, 0x80, 0x74 };
+		pos = 0;
+		while (pos + 19 <= elf.Length)
+		{
+			int idx = elf.Slice(pos).IndexOf(amprStatPrefix);
+			if (idx < 0) break;
+			int matchPos = pos + idx;
+			if (matchPos + 18 <= elf.Length && elf.Slice(matchPos + 12, amprStatSuffix.Length).SequenceEqual(amprStatSuffix))
+			{
+				elf[matchPos + 7] = 0xB8;
+				elf[matchPos + 8] = 0x08;
+				elf[matchPos + 9] = 0x00;
+				elf[matchPos + 10] = 0x9F;
+				elf[matchPos + 11] = 0x80;
+				count++;
+				logger?.Invoke($"[stage 0/5] [Backport] Inlined AMPR fallback return code at offset 0x{matchPos + 7:X}");
+			}
+			pos = matchPos + 8;
+		}
+
+		// Generic secondary device/init call (02 00 00 00 0F 44 F8 E8 ?? ?? ?? ?? 85 C0 74 1D) -> inlined xor eax, eax; 3 NOPs
+		ReadOnlySpan<byte> initCallPre = stackalloc byte[] { 0x02, 0x00, 0x00, 0x00, 0x0F, 0x44, 0xF8, 0xE8 };
+		ReadOnlySpan<byte> initCallSuf = stackalloc byte[] { 0x85, 0xC0, 0x74, 0x1D };
+		pos = 0;
+		while (pos + 17 <= elf.Length)
+		{
+			int idx = elf.Slice(pos).IndexOf(initCallPre);
+			if (idx < 0) break;
+			int matchPos = pos + idx;
+			if (matchPos + 16 <= elf.Length && elf.Slice(matchPos + 12, initCallSuf.Length).SequenceEqual(initCallSuf))
+			{
+				elf[matchPos + 7] = 0x31;
+				elf[matchPos + 8] = 0xC0;
+				elf[matchPos + 9] = 0x90;
+				elf[matchPos + 10] = 0x90;
+				elf[matchPos + 11] = 0x90;
+				count++;
+				logger?.Invoke($"[stage 0/5] [Backport] Inlined device query success return at offset 0x{matchPos + 7:X}");
+			}
+			pos = matchPos + 8;
+		}
+
+		return count;
+	}
+
+	public record CompatibilityStubRule(string FileName, string ModuleName, ulong MinFirmwareSdk, string Description);
+
+	public static readonly CompatibilityStubRule[] KnownCompatibilityModules =
+	[
+		new("libSceAmpr.sprx", "libSceAmpr", 0x0600000000000000uL, "Adaptive Media Playback (AMPR) streaming module"),
+		new("libScePsml.sprx", "libScePsml", 0x0600000000000000uL, "PlayStation Media Layer (PSML) module"),
+		new("libSceAgcDriver.sprx", "libSceAgcDriver", 0x0500000000000000uL, "Next-gen AGC driver graphics interface"),
+		new("libSceAgc.sprx", "libSceAgc", 0x0500000000000000uL, "Advanced Graphics Core (AGC) user module"),
+		new("libScePlayGo.sprx", "libScePlayGo", 0x0500000000000000uL, "PlayGo chunk streaming module"),
+	];
+
+	public static bool IsModuleMissingOnTargetSdk(string fileName, ulong targetSdk)
+	{
+		foreach (var rule in KnownCompatibilityModules)
+		{
+			if (rule.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase))
+			{
+				return targetSdk < rule.MinFirmwareSdk;
+			}
+		}
+		return targetSdk < 0x0500000000000000uL;
+	}
+
+	/// <summary>
+	/// Inspects an executable ELF image to detect which compatibility modules are imported/referenced.
+	/// </summary>
+	public static HashSet<string> DetectImportedCompatibilityModules(ReadOnlySpan<byte> elf, IEnumerable<string>? additionalFiles = null)
+	{
+		var detected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		if (elf.Length < 64) return detected;
+
+		foreach (var rule in KnownCompatibilityModules)
+		{
+			byte[] fileBytes = Encoding.ASCII.GetBytes(rule.FileName);
+			if (elf.IndexOf(fileBytes) >= 0)
+			{
+				detected.Add(rule.FileName);
+				continue;
+			}
+
+			byte[] modBytes = Encoding.ASCII.GetBytes(rule.ModuleName + "\0");
+			if (elf.IndexOf(modBytes) >= 0)
+			{
+				detected.Add(rule.FileName);
+			}
+		}
+
+		if (additionalFiles != null)
+		{
+			foreach (var file in additionalFiles)
+			{
+				string fname = Path.GetFileName(file);
+				if (detected.Contains(fname)) continue;
+
+				string mname = Path.GetFileNameWithoutExtension(fname);
+				byte[] fileBytes = Encoding.ASCII.GetBytes(fname);
+				if (elf.IndexOf(fileBytes) >= 0)
+				{
+					detected.Add(fname);
+					continue;
+				}
+
+				byte[] modBytes = Encoding.ASCII.GetBytes(mname + "\0");
+				if (elf.IndexOf(modBytes) >= 0)
+				{
+					detected.Add(fname);
+				}
+			}
+		}
+
+		return detected;
+	}
+
+	/// <summary>
 	/// Recursively scans a decrypted PS5 game dump folder for executable binaries (.bin, .elf, .prx, .sprx),
-	/// sanitizes any truncated section header tables, and converts decrypted ELFs into fake-signed FSELFs.
-	/// Equivalent to the alex-free/ps5-make-fself-recursive tool.
+	/// sanitizes any truncated section header tables, converts decrypted ELFs into fake-signed FSELFs,
+	/// and optionally down-patches SDK versions for backporting.
 	/// </summary>
 	/// <param name="sourceDir">Path to the game dump root folder.</param>
 	/// <param name="logger">Optional progress callback.</param>
+	/// <param name="cancellationToken">Cancellation token.</param>
+	/// <param name="targetSdkVersion">Optional target SDK version to down-patch executables to (e.g. 0x0400000000000000).</param>
+	/// <param name="bundledFakelibDir">Optional path to bundled fakelib stubs for selective dependency injection.</param>
 	/// <returns>Number of ELFs converted to FSELF.</returns>
-	public static int RecursiveMakeFself(string sourceDir, Action<string>? logger = null)
+	public static int RecursiveMakeFself(string sourceDir, Action<string>? logger = null, CancellationToken cancellationToken = default, ulong? targetSdkVersion = null, string? bundledFakelibDir = null)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(sourceDir, nameof(sourceDir));
 		if (!Directory.Exists(sourceDir)) return 0;
 
-		logger?.Invoke("[stage 0/5] Pre-processing game dump (recursive make_fself)...");
+		cancellationToken.ThrowIfCancellationRequested();
+
+		if (targetSdkVersion.HasValue && targetSdkVersion.Value > 0)
+		{
+			logger?.Invoke($"[stage 0/5] [Backport] SDK down-patch enabled: Target SDK = 0x{targetSdkVersion.Value:X16}");
+		}
+		else
+		{
+			logger?.Invoke("[stage 0/5] Pre-processing game dump (recursive make_fself)...");
+		}
 
 		byte[]? applicationSceVersion = null;
 		string ebootPath = Path.Combine(sourceDir, "eboot.bin");
@@ -538,16 +1073,50 @@ public static class ProsperoFself
 			catch { }
 		}
 
+		if (targetSdkVersion.HasValue && targetSdkVersion.Value > 0 && applicationSceVersion != null)
+		{
+			byte targetMajor = (byte)(targetSdkVersion.Value >> 56);
+			byte targetMinor = (byte)(targetSdkVersion.Value >> 48);
+			if (applicationSceVersion[0] > targetMajor || (applicationSceVersion[0] == targetMajor && applicationSceVersion[1] > targetMinor))
+			{
+				applicationSceVersion[0] = targetMajor;
+				applicationSceVersion[1] = targetMinor;
+			}
+		}
+
 		int convertedCount = 0;
 		int sanitizedCount = 0;
+		int totalProcParamCount = 0;
+		int totalAmprCount = 0;
+		int totalSymCount = 0;
+		int totalBackportCount = 0;
+		var detectedCompatibilityImports = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		string[]? candidateFiles = null;
+		if (!string.IsNullOrEmpty(bundledFakelibDir) && Directory.Exists(bundledFakelibDir))
+		{
+			try
+			{
+				candidateFiles = Directory.EnumerateFiles(bundledFakelibDir, "*.*").ToArray();
+			}
+			catch { }
+		}
 		string[] extensions = { ".bin", ".elf", ".prx", ".sprx" };
 
 		try
 		{
 			foreach (string file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
 			{
+				cancellationToken.ThrowIfCancellationRequested();
+
 				string ext = Path.GetExtension(file).ToLowerInvariant();
-				if (!extensions.Contains(ext)) continue;
+				if (!extensions.Contains(ext) || file.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase)) continue;
+
+				string relPath = Path.GetRelativePath(sourceDir, file);
+				string[] pathParts = relPath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+				if (pathParts.Any(p => p.Equals("fakelib", StringComparison.OrdinalIgnoreCase)))
+				{
+					continue;
+				}
 
 				try
 				{
@@ -561,13 +1130,24 @@ public static class ProsperoFself
 					}
 
 					uint magic = BinaryPrimitives.ReadUInt32LittleEndian(header);
-					string relPath = Path.GetRelativePath(sourceDir, file);
 					byte[] elfBytes;
+					byte[]? selfTrailer = null;
 
-					// If already a native PS5 SELF/FSELF (0xEEF51454 / 54 14 f5 ee), nothing to do
-					if (magic == Magic)
+					if (magic == Magic) // Native PS5 SELF/FSELF (0xEEF51454 / 54 14 f5 ee)
 					{
-						continue;
+						byte[] selfBytes = File.ReadAllBytes(file);
+						if (!TryUnfself(selfBytes, out byte[]? extractedElf) || extractedElf == null)
+						{
+							logger?.Invoke($"[stage 0/5] Skipping non-unpackable PS5 SELF: {relPath}");
+							continue;
+						}
+						elfBytes = extractedElf;
+						var trailerSpan = GetSceVersionRecords(selfBytes);
+						if (!trailerSpan.IsEmpty)
+						{
+							selfTrailer = trailerSpan.ToArray();
+						}
+						logger?.Invoke($"[stage 0/5] Unpacked PS5 SELF: {relPath} ({selfBytes.Length:N0} -> {elfBytes.Length:N0} bytes)");
 					}
 					else if (magic == OrbisMagic) // Legacy PS4/Orbis FSELF (0x1D3D154F / 4f 15 3d 1d)
 					{
@@ -578,6 +1158,11 @@ public static class ProsperoFself
 							continue;
 						}
 						elfBytes = extractedElf;
+						var trailerSpan = GetSceVersionRecords(selfBytes);
+						if (!trailerSpan.IsEmpty)
+						{
+							selfTrailer = trailerSpan.ToArray();
+						}
 						logger?.Invoke($"[stage 0/5] Unpacked Orbis FSELF to clean ELF: {relPath} ({selfBytes.Length:N0} -> {elfBytes.Length:N0} bytes)");
 					}
 					else if (IsElf(header))
@@ -587,6 +1172,17 @@ public static class ProsperoFself
 					else
 					{
 						continue;
+					}
+
+					cancellationToken.ThrowIfCancellationRequested();
+
+					var importedLibs = DetectImportedCompatibilityModules(elfBytes, candidateFiles);
+					foreach (var lib in importedLibs)
+					{
+						if (detectedCompatibilityImports.Add(lib))
+						{
+							logger?.Invoke($"[stage 0/5] [Backport] Detected system module dependency '{lib}' in {relPath}");
+						}
 					}
 
 					// Check and sanitize truncated section header tables in the ELF
@@ -608,38 +1204,168 @@ public static class ProsperoFself
 						}
 					}
 
+					bool isOrbisTarget = targetSdkVersion.HasValue && targetSdkVersion.Value > 0 && targetSdkVersion.Value < 0x0500000000000000uL;
+
+					if (targetSdkVersion.HasValue && targetSdkVersion.Value > 0)
+					{
+						PatchElfSceVersionSection(elfBytes, targetSdkVersion.Value);
+						int procParamCount = PatchElfProcParam(elfBytes, targetSdkVersion.Value);
+						if (procParamCount > 0)
+						{
+							totalProcParamCount += procParamCount;
+							logger?.Invoke($"[stage 0/5] [Backport] Patched {procParamCount} embedded PT_SCE_PROCPARAM SDK block(s) in {relPath}");
+						}
+						int amprCount = PatchElfAmprBypass(elfBytes, logger);
+						totalAmprCount += amprCount;
+
+						int symCount = PatchElfSymbolVersions(elfBytes, targetSdkVersion.Value, logger);
+						totalSymCount += symCount;
+
+						int backportCount = PatchElfExecutableBackport(elfBytes, targetSdkVersion.Value, logger);
+						totalBackportCount += backportCount;
+
+						if (selfTrailer != null && selfTrailer.Length > 0)
+						{
+							selfTrailer = PatchSceVersionRecords(selfTrailer, targetSdkVersion.Value);
+						}
+					}
+
 					FselfOptions? options = null;
 					string fileName = Path.GetFileName(file);
-					if (!fileName.Equals("eboot.bin", StringComparison.OrdinalIgnoreCase) &&
+					if (selfTrailer != null && selfTrailer.Length > 0)
+					{
+						options = new FselfOptions
+						{
+							SceVersionRecords = selfTrailer,
+							FirmwareVersion = targetSdkVersion ?? 0uL,
+							UseOrbisContainer = isOrbisTarget,
+							ProgramType = isOrbisTarget ? 0x00000101u : 268435713u
+						};
+					}
+					else if (!fileName.Equals("eboot.bin", StringComparison.OrdinalIgnoreCase) &&
 					    applicationSceVersion != null &&
 					    !TryGetSceVersionRecord(elfBytes, out _))
 					{
 						options = new FselfOptions
 						{
 							SceVersionName = Path.GetFileNameWithoutExtension(fileName),
-							SceVersionRecord = applicationSceVersion
+							SceVersionRecord = applicationSceVersion,
+							FirmwareVersion = targetSdkVersion ?? 0uL,
+							UseOrbisContainer = isOrbisTarget,
+							ProgramType = isOrbisTarget ? 0x00000101u : 268435713u
+						};
+					}
+					else if (targetSdkVersion.HasValue && targetSdkVersion.Value > 0)
+					{
+						options = new FselfOptions
+						{
+							FirmwareVersion = targetSdkVersion.Value,
+							UseOrbisContainer = isOrbisTarget,
+							ProgramType = isOrbisTarget ? 0x00000101u : 268435713u
+						};
+					}
+					else if (isOrbisTarget)
+					{
+						options = new FselfOptions
+						{
+							UseOrbisContainer = true,
+							ProgramType = 0x00000101u
 						};
 					}
 
+					cancellationToken.ThrowIfCancellationRequested();
+
 					byte[] fself = MakeFself(elfBytes, options);
+					string bakFile = file + ".bak";
+					if (!File.Exists(bakFile))
+					{
+						try
+						{
+							File.Copy(file, bakFile, overwrite: false);
+						}
+						catch { }
+					}
 					File.WriteAllBytes(file, fself);
 					convertedCount++;
 
-					logger?.Invoke($"[stage 0/5] Fake-signed native PS5 FSELF (0xEEF51454): {relPath} ({fself.Length:N0} bytes)");
+					if (isOrbisTarget)
+					{
+						logger?.Invoke($"[stage 0/5] Fake-signed legacy Orbis FSELF (0x1D3D154F) [Backported 0x{targetSdkVersion!.Value:X16} for FW 3.xx-4.xx]: {relPath} ({fself.Length:N0} bytes)");
+					}
+					else if (targetSdkVersion.HasValue && targetSdkVersion.Value > 0)
+					{
+						logger?.Invoke($"[stage 0/5] Fake-signed native PS5 FSELF [Backported 0x{targetSdkVersion.Value:X16}]: {relPath} ({fself.Length:N0} bytes)");
+					}
+					else
+					{
+						logger?.Invoke($"[stage 0/5] Fake-signed native PS5 FSELF (0xEEF51454): {relPath} ({fself.Length:N0} bytes)");
+					}
 				}
-				catch (Exception ex)
+				catch (Exception ex) when (ex is not OperationCanceledException)
 				{
-					string relPath = Path.GetRelativePath(sourceDir, file);
 					logger?.Invoke($"[stage 0/5] Warning: could not fake-sign '{relPath}': {ex.Message}");
 				}
 			}
 		}
-		catch (Exception ex)
+		catch (Exception ex) when (ex is not OperationCanceledException)
 		{
 			logger?.Invoke($"[stage 0/5] Scan warning: {ex.Message}");
 		}
 
-		logger?.Invoke($"[stage 0/5] Pre-processing complete: {convertedCount} decrypted ELF(s) converted to FSELF{(sanitizedCount > 0 ? $", {sanitizedCount} section table(s) sanitized" : "")}.");
+		if (targetSdkVersion.HasValue && targetSdkVersion.Value > 0)
+		{
+			logger?.Invoke($"[stage 0/5] [Backport Summary] Completed backport to SDK 0x{targetSdkVersion.Value:X16}:");
+			logger?.Invoke($"[stage 0/5]   - Executables converted: {convertedCount} file(s)");
+			logger?.Invoke($"[stage 0/5]   - ProcParam blocks down-patched: {totalProcParamCount}");
+			logger?.Invoke($"[stage 0/5]   - Hardware AMPR stream bypasses: {totalAmprCount}");
+			logger?.Invoke($"[stage 0/5]   - Dynamic symbol version mappings: {totalSymCount}");
+			logger?.Invoke($"[stage 0/5]   - Inlined system call stubs: {totalBackportCount}");
+			if (sanitizedCount > 0)
+			{
+				logger?.Invoke($"[stage 0/5]   - Section header tables sanitized: {sanitizedCount}");
+			}
+
+			if (!string.IsNullOrEmpty(bundledFakelibDir) && Directory.Exists(bundledFakelibDir))
+			{
+				var missingStubs = detectedCompatibilityImports
+					.Where(lib => IsModuleMissingOnTargetSdk(lib, targetSdkVersion.Value))
+					.ToList();
+
+				if (missingStubs.Count > 0)
+				{
+					string fakelibDir = Path.Combine(sourceDir, "fakelib");
+					Directory.CreateDirectory(fakelibDir);
+					int stagedCount = 0;
+					foreach (var stubName in missingStubs)
+					{
+						string bundledPath = Path.Combine(bundledFakelibDir, stubName);
+						string targetPath = Path.Combine(fakelibDir, stubName);
+						if (File.Exists(bundledPath) && !File.Exists(targetPath))
+						{
+							try
+							{
+								File.Copy(bundledPath, targetPath, overwrite: false);
+								stagedCount++;
+								logger?.Invoke($"[stage 0/5] [Backport] Staged missing system module '{stubName}' in fakelib/ (Target SDK 0x{targetSdkVersion.Value:X16} lacks native module).");
+							}
+							catch { }
+						}
+					}
+					if (stagedCount > 0)
+					{
+						logger?.Invoke($"[stage 0/5] [Backport] Staged {stagedCount} required compatibility module(s) in fakelib/ for ShadowMount/OnionHEN.");
+					}
+				}
+				else
+				{
+					logger?.Invoke($"[stage 0/5] [Backport] Dynamic dependency check: 0 missing compatibility stubs required for Target SDK 0x{targetSdkVersion.Value:X16}. fakelib staging skipped.");
+				}
+			}
+		}
+		else
+		{
+			logger?.Invoke($"[stage 0/5] Pre-processing complete: {convertedCount} decrypted ELF(s) converted to FSELF{(sanitizedCount > 0 ? $", {sanitizedCount} section table(s) sanitized" : "")}.");
+		}
 		return convertedCount;
 	}
 

@@ -35,9 +35,21 @@ public class PfsReader
 			{
 				if (parent == null)
 				{
-					return name;
+					return name ?? "";
 				}
-				return parent.FullName + "/" + name;
+				List<string> parts = new List<string>();
+				Node? curr = this;
+				HashSet<Node> visited = new HashSet<Node>();
+				while (curr != null && visited.Add(curr))
+				{
+					if (!string.IsNullOrEmpty(curr.name))
+					{
+						parts.Add(curr.name);
+					}
+					curr = curr.parent;
+				}
+				parts.Reverse();
+				return string.Join("/", parts);
 			}
 		}
 	}
@@ -73,19 +85,24 @@ public class PfsReader
 
 		public IEnumerable<File> GetAllFiles()
 		{
-			foreach (Node n in children)
+			Queue<Dir> dirQueue = new Queue<Dir>();
+			HashSet<Dir> visited = new HashSet<Dir>();
+			dirQueue.Enqueue(this);
+			visited.Add(this);
+
+			while (dirQueue.Count > 0)
 			{
-				if (n is File file)
+				Dir current = dirQueue.Dequeue();
+				foreach (Node n in current.children)
 				{
-					yield return file;
-				}
-				if (!(n is Dir dir))
-				{
-					continue;
-				}
-				foreach (File allFile in dir.GetAllFiles())
-				{
-					yield return allFile;
+					if (n is File file)
+					{
+						yield return file;
+					}
+					else if (n is Dir subDir && visited.Add(subDir))
+					{
+						dirQueue.Enqueue(subDir);
+					}
 				}
 			}
 		}
@@ -277,7 +294,7 @@ public class PfsReader
 				dinodes[num2++] = func(sectorStream);
 			}
 		}
-		root = LoadDir(0u, null, "");
+		root = LoadDirectoryTree(0u);
 		uroot = root.Get("uroot") as Dir;
 		if (uroot == null)
 		{
@@ -309,52 +326,90 @@ public class PfsReader
 		return root;
 	}
 
-	private Dir LoadDir(uint dinode, Dir parent, string name)
+	private Dir LoadDirectoryTree(uint rootDinode)
 	{
-		Dir ret = new Dir
+		Dir rootDir = new Dir
 		{
-			name = name,
-			parent = parent
+			name = "",
+			parent = null,
+			ino = rootDinode
 		};
-		Inode inode = dinodes[dinode];
-		List<Func<Dir>> list = new List<Func<Dir>>();
-		bool flag = inode is DinodePpr;
-		int num = (flag ? checked((int)Math.Max(1L, unchecked(checked(inode.Size + hdr.BlockSize - 1) / hdr.BlockSize))) : ((int)inode.Blocks));
-		long num2 = (flag ? ((DinodePpr)inode).DataOffset : (inode.StartBlock * hdr.BlockSize));
-		if (num < 1 || num2 < 0 || num2 / hdr.BlockSize > 100000000 || num > 100000000)
+
+		HashSet<uint> visited = new HashSet<uint> { rootDinode };
+		Queue<(uint dinode, Dir dirNode)> queue = new Queue<(uint dinode, Dir dirNode)>();
+		queue.Enqueue((rootDinode, rootDir));
+
+		while (queue.Count > 0)
 		{
-			throw new Exception($"Inode {dinode} is corrupt. ");
-		}
-		for (int i = 0; i < num; i++)
-		{
-			long num3 = checked(num2 + i * hdr.BlockSize);
-			long num4 = num3;
-			reader.Read(num3, sectorBuf, 0, sectorBuf.Length);
-			sectorStream.Position = 0L;
-			PfsDirent dirent;
-			for (; num4 < num3 + hdr.BlockSize; num4 += dirent.EntSize)
+			var (currDinode, currDir) = queue.Dequeue();
+			if (currDinode >= dinodes.Length || dinodes[currDinode] == null)
 			{
-				dirent = PfsDirent.ReadFromStream(sectorStream);
-				if (dirent.EntSize == 0)
+				continue;
+			}
+
+			Inode inode = dinodes[currDinode];
+			bool flag = inode is DinodePpr;
+			int num = (flag ? checked((int)Math.Max(1L, unchecked(checked(inode.Size + hdr.BlockSize - 1) / hdr.BlockSize))) : ((int)inode.Blocks));
+			long num2 = (flag ? ((DinodePpr)inode).DataOffset : (inode.StartBlock * hdr.BlockSize));
+			if (num < 1 || num2 < 0 || num2 / hdr.BlockSize > 100000000 || num > 100000000)
+			{
+				continue;
+			}
+
+			for (int i = 0; i < num; i++)
+			{
+				long num3 = checked(num2 + i * hdr.BlockSize);
+				long num4 = num3;
+				reader.Read(num3, sectorBuf, 0, sectorBuf.Length);
+				sectorStream.Position = 0L;
+				PfsDirent dirent;
+				for (; num4 < num3 + hdr.BlockSize; num4 += dirent.EntSize)
 				{
-					break;
-				}
-				switch (dirent.Type)
-				{
-				case DirentType.File:
-					ret.children.Add(LoadFile(dirent.InodeNumber, ret, dirent.Name));
-					break;
-				case DirentType.Directory:
-					list.Add(() => LoadDir(dirent.InodeNumber, ret, dirent.Name));
-					break;
+					dirent = PfsDirent.ReadFromStream(sectorStream);
+					if (dirent.EntSize == 0)
+					{
+						break;
+					}
+
+					// Skip self, parent, and invalid entries
+					if (string.IsNullOrWhiteSpace(dirent.Name) ||
+					    dirent.Name == "." || dirent.Name == ".." ||
+					    dirent.Type == DirentType.Dot || dirent.Type == DirentType.DotDot ||
+					    dirent.InodeNumber == currDinode)
+					{
+						continue;
+					}
+
+					if (dirent.InodeNumber >= dinodes.Length || dinodes[dirent.InodeNumber] == null)
+					{
+						continue;
+					}
+
+					switch (dirent.Type)
+					{
+					case DirentType.File:
+						currDir.children.Add(LoadFile(dirent.InodeNumber, currDir, dirent.Name));
+						break;
+
+					case DirentType.Directory:
+						if (visited.Add(dirent.InodeNumber))
+						{
+							Dir childDir = new Dir
+							{
+								name = dirent.Name,
+								parent = currDir,
+								ino = dirent.InodeNumber
+							};
+							currDir.children.Add(childDir);
+							queue.Enqueue((dirent.InodeNumber, childDir));
+						}
+						break;
+					}
 				}
 			}
 		}
-		foreach (Func<Dir> item in list)
-		{
-			ret.children.Add(item());
-		}
-		return ret;
+
+		return rootDir;
 	}
 
 	private File LoadFile(uint dinode, Dir parent, string name)

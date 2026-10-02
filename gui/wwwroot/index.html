@@ -23,7 +23,7 @@
         </div>
         <div class="brand-text">
           <span class="brand-title">LibProsperoPKG</span>
-          <span class="brand-subtitle">PS5 Package Studio • macOS</span>
+          <span class="brand-subtitle">PS5 Package Studio • macOS <span class="brand-version">v1.6.0</span></span>
         </div>
       </div>
 
@@ -76,7 +76,7 @@
             <div class="form-group">
               <label for="input-source">Source Directory (Project Folder)</label>
               <div class="input-with-button">
-                <input type="text" id="input-source" placeholder="/path/to/my_ps5_game_or_app" spellcheck="false" autocomplete="off">
+                <input type="text" id="input-source" placeholder="/path/to/my_ps5_game_or_app (or drop folder here)" spellcheck="false" autocomplete="off">
                 <button type="button" class="btn btn-secondary" id="btn-browse-source">Browse...</button>
               </div>
               <div class="metadata-banner" id="metadata-banner" style="display: none;">
@@ -84,6 +84,7 @@
                   <span class="meta-tag" id="meta-tag-param">param.json detected</span>
                   <span class="meta-title" id="meta-title-text"></span>
                   <span class="meta-playgo" id="meta-playgo-text"></span>
+                  <span class="meta-disk" id="meta-disk-text" style="display: none;"></span>
                 </div>
               </div>
             </div>
@@ -92,7 +93,7 @@
             <div class="form-group">
               <label for="input-output">Output Directory</label>
               <div class="input-with-button">
-                <input type="text" id="input-output" placeholder="/path/to/output_folder" spellcheck="false" autocomplete="off">
+                <input type="text" id="input-output" placeholder="/path/to/output_folder (or drop folder here)" spellcheck="false" autocomplete="off">
                 <button type="button" class="btn btn-secondary" id="btn-browse-output">Browse...</button>
               </div>
             </div>
@@ -167,11 +168,6 @@
                   <span class="checkmark"></span>
                   Stage 0: FSELF
                 </label>
-                <label class="checkbox-container" title="Automatically patch requiredSystemSoftwareVersion to FW 1.00 in param.json to prevent CE-100005-6 / CE-107880-4">
-                  <input type="checkbox" id="chk-backport" checked>
-                  <span class="checkmark"></span>
-                  Backport (FW 1.00)
-                </label>
                 <label class="checkbox-container">
                   <input type="checkbox" id="chk-deterministic" checked>
                   <span class="checkmark"></span>
@@ -182,6 +178,41 @@
                   <span class="checkmark"></span>
                   Auto-Verify
                 </label>
+              </div>
+            </div>
+
+            <!-- Mode Option: Already Patched / Direct Packaging -->
+            <div class="form-row align-center already-patched-group-row">
+              <div class="form-group flex-1">
+                <label class="checkbox-container already-patched-chk-label" title="Skip all ELF signing, backport patches, and file modifications. Use this if your game files are already patched and you only want to build the FPKG without touching any files.">
+                  <input type="checkbox" id="chk-already-patched">
+                  <span class="checkmark"></span>
+                  <span class="already-patched-toggle-text">
+                    🔒 Game is already patched (Direct FPKG • Leave files untouched)
+                    <span class="badge-untouched">Pass-Through</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Backport Configuration (Selectable SDK) -->
+            <div class="form-row align-center backport-group-row">
+              <div class="form-group flex-1">
+                <label class="checkbox-container backport-chk-label" title="Enable executable SDK and firmware backporting for lower jailbroken PS5 versions">
+                  <input type="checkbox" id="chk-backport" checked>
+                  <span class="checkmark"></span>
+                  <span class="backport-toggle-text">Backport SDK <span class="badge-experimental">Experimental</span></span>
+                </label>
+              </div>
+              <div class="form-group flex-2" id="backport-sdk-container">
+                <label for="select-backport-sdk">Target SDK Version <span class="badge-experimental">Experimental</span></label>
+                <select id="select-backport-sdk">
+                  <option value="0x0400000000000000" selected>⚡ SDK 4.00 (FW 4.00 - 4.51) — Experimental</option>
+                  <option value="0x0300000000000000">SDK 3.00 (FW 3.00 - 3.21) — Experimental</option>
+                  <option value="0x0500000000000000">SDK 5.00 (FW 5.00 - 5.50) — Experimental</option>
+                  <option value="0x0100000000000000">SDK 1.00 (FW 1.00 - 2.xx) — Experimental</option>
+                  <option value="param_only">param.json only (FW 1.00 Safe)</option>
+                </select>
               </div>
             </div>
 
@@ -334,7 +365,7 @@
                 <div class="unpack-form-row">
                   <label class="unpack-field-label">Output Directory</label>
                   <div class="unpack-field-input-wrap">
-                    <input type="text" id="unpack-out-dir" placeholder="Directory for unpacked files..." spellcheck="false">
+                    <input type="text" id="unpack-out-dir" placeholder="Directory for unpacked files (or drop folder here)..." spellcheck="false">
                     <button type="button" class="btn btn-secondary btn-sm" id="btn-browse-unpack-dir">Browse...</button>
                   </div>
                 </div>

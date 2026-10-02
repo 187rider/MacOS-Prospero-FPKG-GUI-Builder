@@ -128,6 +128,17 @@ public sealed class AppLogic
         _window.SendWebMessage(json);
     }
 
+    public void HandleNativeFilesDropped(IReadOnlyList<string> paths, double x, double y)
+    {
+        if (paths == null || paths.Count == 0) return;
+        SendResponse("nativeFilesDropped", new
+        {
+            paths = paths,
+            x = x,
+            y = y
+        });
+    }
+
     private void HandleBrowseFolder(JsonElement root)
     {
         string target = root.TryGetProperty("target", out var t) ? t.GetString() ?? "source" : "source";
@@ -215,6 +226,12 @@ public sealed class AppLogic
         string[] playgoFiles = { "playgo-chunk.dat", "playgo-hash-table.dat", "playgo-ficm.dat" };
         int existingPlaygo = playgoFiles.Count(f => File.Exists(Path.Combine(sourceDir, "sce_sys", f)));
 
+        long sourceSize = CalculateDirectorySize(sourceDir);
+        var disk = GetDiskSpace(sourceDir);
+        long safetyReserve = Math.Max(2L * 1024 * 1024 * 1024, (long)(sourceSize * 0.05));
+        long estimatedRequired = (sourceSize * 3L) + (1024L * 1024 * 1024) + safetyReserve;
+        bool hasEnough = !disk.Success || disk.FreeSpace >= estimatedRequired;
+
         SendResponse("metadataScanned", new
         {
             hasParamJson,
@@ -222,7 +239,13 @@ public sealed class AppLogic
             title = title ?? Path.GetFileName(sourceDir.TrimEnd('/', '\\')),
             version = version ?? "01.00",
             titleId = (contentId != null && contentId.Length >= 16) ? contentId.Substring(7, 9) : "PPSA00000",
-            playgoStatus = existingPlaygo == 3 ? "All 3 PlayGo files detected" : (existingPlaygo > 0 ? "Partial PlayGo files detected" : "Automatic 1-chunk PlayGo generation")
+            playgoStatus = existingPlaygo == 3 ? "All 3 PlayGo files detected" : (existingPlaygo > 0 ? "Partial PlayGo files detected" : "Automatic 1-chunk PlayGo generation"),
+            sourceSizeBytes = sourceSize,
+            sourceSizeFormatted = FormatBytes(sourceSize),
+            freeSpaceBytes = disk.FreeSpace,
+            freeSpaceFormatted = FormatBytes(disk.FreeSpace),
+            requiredSpaceFormatted = FormatBytes(estimatedRequired),
+            hasEnoughSpace = hasEnough
         });
     }
 
@@ -230,6 +253,11 @@ public sealed class AppLogic
     {
         try
         {
+            _buildCts?.Cancel();
+            _buildCts?.Dispose();
+            _buildCts = new CancellationTokenSource();
+            var ct = _buildCts.Token;
+
             string source = root.GetProperty("source").GetString() ?? "";
             string output = root.GetProperty("output").GetString() ?? "";
             string contentId = root.GetProperty("contentId").GetString() ?? "";
@@ -244,6 +272,24 @@ public sealed class AppLogic
             bool verify = !root.TryGetProperty("verify", out var ver) || ver.GetBoolean();
             bool autoFself = !root.TryGetProperty("autoFself", out var af) || af.GetBoolean();
             bool autoBackport = !root.TryGetProperty("autoBackport", out var ab) || ab.GetBoolean();
+            bool alreadyPatched = root.TryGetProperty("alreadyPatched", out var ap) && ap.GetBoolean();
+            string targetSdkStr = root.TryGetProperty("targetSdk", out var ts) ? ts.GetString() ?? "0x0400000000000000" : "0x0400000000000000";
+
+            ulong? targetSdkVersion = null;
+            if (!alreadyPatched && autoBackport && !string.Equals(targetSdkStr, "param_only", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    string cleanHex = targetSdkStr.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                        ? targetSdkStr.Substring(2)
+                        : targetSdkStr;
+                    targetSdkVersion = Convert.ToUInt64(cleanHex, 16);
+                }
+                catch
+                {
+                    targetSdkVersion = 0x0400000000000000uL; // Default to SDK 4.00
+                }
+            }
 
             if (!Directory.Exists(source))
             {
@@ -253,7 +299,6 @@ public sealed class AppLogic
 
             source = Path.GetFullPath(source);
             output = Path.GetFullPath(output);
-            Directory.CreateDirectory(output);
 
             if (output.Equals(source, StringComparison.OrdinalIgnoreCase) ||
                 output.StartsWith(source + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
@@ -268,9 +313,13 @@ public sealed class AppLogic
                 return;
             }
 
-            // If files were extracted to root without an sce_sys folder, automatically ensure sce_sys/ has them
-            string sceSysDir = Path.Combine(source, "sce_sys");
-            Directory.CreateDirectory(sceSysDir);
+            Directory.CreateDirectory(output);
+
+            if (!alreadyPatched)
+            {
+                // If files were extracted to root without an sce_sys folder, automatically ensure sce_sys/ has them
+                string sceSysDir = Path.Combine(source, "sce_sys");
+                Directory.CreateDirectory(sceSysDir);
 
             string[] sysFileNames = { "param.json", "icon0.png", "icon0.dds", "pic0.png", "pic0.dds" };
             foreach (var sfn in sysFileNames)
@@ -282,6 +331,7 @@ public sealed class AppLogic
                     File.Copy(rootFile, targetFile, overwrite: true);
                 }
             }
+
 
             // Automatically patch param.json for PS5 compatibility
             string targetParamJson = Path.Combine(sceSysDir, "param.json");
@@ -321,12 +371,39 @@ public sealed class AppLogic
                                 jObj["requiredSystemSoftwareVersion"] = "0x0100000000000000";
                                 modified = true;
                             }
+
+                            if (jObj.ContainsKey("targetSystemSoftwareVersion"))
+                            {
+                                jObj.Remove("targetSystemSoftwareVersion");
+                                modified = true;
+                            }
+
+                            if (targetSdkVersion.HasValue)
+                            {
+                                string targetHex = $"0x{targetSdkVersion.Value:X16}";
+                                if (!jObj.TryGetPropertyValue("sdkVersion", out var sdkNode) ||
+                                    !string.Equals(sdkNode?.ToString(), targetHex, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    jObj["sdkVersion"] = targetHex;
+                                    modified = true;
+                                }
+                            }
                         }
 
                         if (modified)
                         {
+                            string bakPath = targetParamJson + ".bak";
+                            if (!File.Exists(bakPath))
+                            {
+                                try
+                                {
+                                    File.Copy(targetParamJson, bakPath, overwrite: false);
+                                    SendResponse("buildLog", new { log = "[stage 0/5] [param.json] Preserved original backup: sce_sys/param.json.bak", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+                                }
+                                catch { }
+                            }
                             File.WriteAllText(targetParamJson, jObj.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-                            SendResponse("buildLog", new { log = "[stage 0/5] [param.json] Optimized param.json for PS5 package installation.", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+                            SendResponse("buildLog", new { log = $"[stage 0/5] [param.json] Optimized and backported param.json for PS5 package installation (requiredSystemSoftwareVersion=0x0100000000000000{(targetSdkVersion.HasValue ? $", sdkVersion=0x{targetSdkVersion.Value:X16}" : "")}).", timestamp = DateTime.Now.ToString("HH:mm:ss") });
                         }
                     }
                 }
@@ -334,6 +411,7 @@ public sealed class AppLogic
                 {
                     SendResponse("buildLog", new { log = $"[stage 0/5] [param.json] Note: could not patch param.json: {ex.Message}", timestamp = DateTime.Now.ToString("HH:mm:ss") });
                 }
+            }
             }
 
             version = NormalizeVersion(version) ?? "01.00";
@@ -397,28 +475,64 @@ public sealed class AppLogic
                 PlayGoChunkCount = Math.Max(1, chunks),
                 PublisherImageMode = imageMode,
                 DeterministicBuild = deterministic,
-                GenerateParamJsonIfMissing = true
+                GenerateParamJsonIfMissing = !alreadyPatched,
+                DisableQuarantine = alreadyPatched,
+                CancellationToken = ct
             };
 
             options.LicenseProvider ??= new LibProsperoPkg.PKG.FakeLicenseProvider();
 
             SendResponse("buildStarted", new { contentId, version });
 
-            if (autoFself)
+            if (alreadyPatched)
+            {
+                SendResponse("buildLog", new { log = "[stage 0/5] [Direct Mode] Game dump is marked as already patched. Skipping Stage 0 (all source files remain 100% untouched).", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+            }
+            else if (autoFself || (autoBackport && targetSdkVersion.HasValue))
             {
                 _currentStage = 0;
                 SendResponse("buildProgress", new { stage = "Stage 0/5", desc = "Pre-processing game dump (make_fself)...", percent = 0 });
+                string? bundledFakelib = null;
+                if (autoBackport && targetSdkVersion.HasValue)
+                {
+                    string appBaseDir = AppContext.BaseDirectory;
+                    bundledFakelib = Path.Combine(appBaseDir, "..", "Resources", "fakelib");
+                    if (!Directory.Exists(bundledFakelib))
+                    {
+                        bundledFakelib = Path.Combine(appBaseDir, "Resources", "fakelib");
+                    }
+                    if (!Directory.Exists(bundledFakelib))
+                    {
+                        bundledFakelib = null;
+                    }
+                }
+
                 RecursiveMakeFself(source, msg =>
                 {
+                    ct.ThrowIfCancellationRequested();
                     SendResponse("buildLog", new { log = msg, timestamp = DateTime.Now.ToString("HH:mm:ss") });
-                });
+                }, ct, targetSdkVersion, bundledFakelib);
             }
             else
             {
                 SanitizeTruncatedElfHeaders(source, msg =>
                 {
+                    ct.ThrowIfCancellationRequested();
                     SendResponse("buildLog", new { log = msg, timestamp = DateTime.Now.ToString("HH:mm:ss") });
-                });
+                }, ct);
+            }
+
+            // Free space check and capacity reservation: Always executed after Stage 0 completes
+            SendResponse("buildLog", new { log = "[DISK] Post-Stage 0 check: validating free disk space and reserving required build capacity...", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+            if (!CheckDiskSpaceBeforeBuild(source, output, out string? diskError, out string? diskSummary))
+            {
+                SendResponse("buildLog", new { log = $"[ERROR] [DISK CHECK FAILED] {diskError}", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+                SendResponse("buildError", new { message = diskError });
+                return;
+            }
+            if (!string.IsNullOrEmpty(diskSummary))
+            {
+                SendResponse("buildLog", new { log = diskSummary, timestamp = DateTime.Now.ToString("HH:mm:ss") });
             }
 
             _currentStage = 1;
@@ -427,6 +541,7 @@ public sealed class AppLogic
             var sw = Stopwatch.StartNew();
             var buildResult = ProsperoPackageBuilder.Build(options, log =>
             {
+                ct.ThrowIfCancellationRequested();
                 SendResponse("buildLog", new { log, timestamp = DateTime.Now.ToString("HH:mm:ss") });
                 ParseAndSendProgress(log);
             });
@@ -471,7 +586,8 @@ public sealed class AppLogic
         catch (OperationCanceledException)
         {
             LibProsperoPkg.Util.BuildCleaner.CleanupAll();
-            SendResponse("buildCancelled", new { message = "Build was cancelled by the user." });
+            SendResponse("buildLog", new { log = "[CANCEL] Build was successfully aborted. All temporary files have been cleared.", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+            SendResponse("buildCancelled", new { message = "Build was cancelled by user. Temporary files cleared." });
         }
         catch (Exception ex)
         {
@@ -493,12 +609,18 @@ public sealed class AppLogic
         {
             if (_buildCts != null && !_buildCts.IsCancellationRequested)
             {
-                SendResponse("buildLog", new { log = "[CANCEL] Cancellation requested. Stopping build and removing temp files...", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+                SendResponse("buildLog", new { log = "[CANCEL] Cancellation requested by user. Aborting build and cleaning temporary files...", timestamp = DateTime.Now.ToString("HH:mm:ss") });
                 _buildCts.Cancel();
             }
+            else
+            {
+                SendResponse("buildCancelled", new { message = "Build was cancelled." });
+            }
         }
-        catch
+        catch (Exception ex)
         {
+            SendResponse("buildLog", new { log = $"[CANCEL ERROR] {ex.Message}", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+            SendResponse("buildCancelled", new { message = "Build was cancelled." });
         }
     }
 
@@ -1180,11 +1302,8 @@ public sealed class AppLogic
             int siFiles = 0;
             if (map.SupplementSize > 0)
             {
-                fs.Position = map.SupplementOffset;
-                byte[] siBytes = new byte[Math.Min(map.SupplementSize, 64 * 1024 * 1024)];
-                fs.ReadExactly(siBytes);
-                using var mem = new MemoryStream(siBytes);
-                using var zip = new ZipArchive(mem, ZipArchiveMode.Read);
+                using var siStream = new LibProsperoPkg.Util.SubStream(fs, map.SupplementOffset, map.SupplementSize);
+                using var zip = new ZipArchive(siStream, ZipArchiveMode.Read);
                 siFiles = zip.Entries.Count;
             }
             SendUnpackLog($"SI central directory is valid ({siFiles} files).");
@@ -1242,8 +1361,24 @@ public sealed class AppLogic
             outDir = Path.GetFullPath(outDir);
             Directory.CreateDirectory(outDir);
 
+            // Pre-flight check: Verify sufficient disk space for unpacking
+            long pkgSize = new FileInfo(pkgPath).Length;
+            long requiredUnpackSpace = pkgSize + (1024L * 1024 * 1024); // PKG size + 1 GB safety reserve
+            var unpackDisk = GetDiskSpace(outDir);
+            if (unpackDisk.Success && unpackDisk.FreeSpace < requiredUnpackSpace)
+            {
+                string msg = $"Insufficient free disk space to unpack package!\n" +
+                             $"• Package Size: {FormatBytes(pkgSize)}\n" +
+                             $"• Required Space (with reserve): {FormatBytes(requiredUnpackSpace)}\n" +
+                             $"• Available Space on '{unpackDisk.Name}': {FormatBytes(unpackDisk.FreeSpace)}\n" +
+                             $"Please free up space on '{unpackDisk.MountPoint}' before unpacking.";
+                SendUnpackLog($"[ERROR] {msg}");
+                SendResponse("unpackResult", new { success = false, message = msg });
+                return;
+            }
+
             SendUnpackLog($"Starting package unpacking: {pkgPath}");
-            SendUnpackLog($"Output directory: {outDir}");
+            SendUnpackLog($"Output directory: {outDir} (Available space: {FormatBytes(unpackDisk.FreeSpace)})");
 
             // 1. CNT entries (sce_sys)
             SendUnpackLog("Extracting CNT entries (sce_sys metadata)...");
@@ -1419,137 +1554,11 @@ public sealed class AppLogic
         return null;
     }
 
-    public static int RecursiveMakeFself(string sourceDir, Action<string>? logger = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sourceDir, nameof(sourceDir));
-        if (!Directory.Exists(sourceDir)) return 0;
+    public static int RecursiveMakeFself(string sourceDir, Action<string>? logger = null, CancellationToken cancellationToken = default, ulong? targetSdkVersion = null, string? bundledFakelibDir = null) =>
+        LibProsperoPkg.Content.ProsperoFself.RecursiveMakeFself(sourceDir, logger, cancellationToken, targetSdkVersion, bundledFakelibDir);
 
-        logger?.Invoke("[stage 0/5] Pre-processing game dump (recursive make_fself)...");
 
-        byte[]? applicationSceVersion = null;
-        string ebootPath = Path.Combine(sourceDir, "eboot.bin");
-        if (File.Exists(ebootPath))
-        {
-            try
-            {
-                byte[] ebootBytes = File.ReadAllBytes(ebootPath);
-                if (LibProsperoPkg.Content.ProsperoFself.TryGetSceVersionRecord(ebootBytes, out byte[] rec) && rec.Length == 8)
-                {
-                    applicationSceVersion = rec;
-                }
-            }
-            catch { }
-        }
-
-        int convertedCount = 0;
-        int sanitizedCount = 0;
-        string[] extensions = { ".bin", ".elf", ".prx", ".sprx" };
-
-        try
-        {
-            foreach (string file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
-            {
-                string ext = Path.GetExtension(file).ToLowerInvariant();
-                if (!extensions.Contains(ext)) continue;
-
-                try
-                {
-                    var fi = new FileInfo(file);
-                    if (fi.Length < 64) continue;
-
-                    byte[] header = new byte[64];
-                    using (var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                    {
-                        if (fs.Read(header, 0, 64) != 64) continue;
-                    }
-
-                    uint magic = BinaryPrimitives.ReadUInt32LittleEndian(header);
-                    string relPath = Path.GetRelativePath(sourceDir, file);
-                    byte[] elfBytes;
-
-                    // If already a native PS5 SELF/FSELF (0xEEF51454 / 54 14 f5 ee), nothing to do
-                    if (magic == 4009038932u)
-                    {
-                        continue;
-                    }
-                    else if (magic == 490542415u) // Legacy PS4/Orbis FSELF (0x1D3D154F / 4f 15 3d 1d)
-                    {
-                        byte[] selfBytes = File.ReadAllBytes(file);
-                        if (!TryUnfself(selfBytes, out byte[]? extractedElf) || extractedElf == null)
-                        {
-                            logger?.Invoke($"[stage 0/5] Warning: could not unpack Orbis FSELF '{relPath}'");
-                            continue;
-                        }
-                        elfBytes = extractedElf;
-                        logger?.Invoke($"[stage 0/5] Unpacked Orbis FSELF to clean ELF: {relPath} ({selfBytes.Length:N0} -> {elfBytes.Length:N0} bytes)");
-                    }
-                    else if (LibProsperoPkg.Content.ProsperoFself.IsElf(header))
-                    {
-                        elfBytes = File.ReadAllBytes(file);
-                    }
-                    else
-                    {
-                        continue;
-                    }
-
-                    // Check and sanitize truncated section header tables in the ELF
-                    if (elfBytes.Length >= 64)
-                    {
-                        ulong e_shoff = BinaryPrimitives.ReadUInt64LittleEndian(elfBytes.AsSpan(40, 8));
-                        ushort e_shentsize = BinaryPrimitives.ReadUInt16LittleEndian(elfBytes.AsSpan(58, 2));
-                        ushort e_shnum = BinaryPrimitives.ReadUInt16LittleEndian(elfBytes.AsSpan(60, 2));
-
-                        if (e_shoff > 0 || e_shnum > 0)
-                        {
-                            long tableEnd = (long)e_shoff + ((long)e_shnum * (long)e_shentsize);
-                            if (tableEnd > elfBytes.Length || (long)e_shoff >= elfBytes.Length)
-                            {
-                                elfBytes.AsSpan(40, 8).Clear();
-                                elfBytes.AsSpan(58, 6).Clear();
-                                sanitizedCount++;
-                            }
-                        }
-                    }
-
-                    LibProsperoPkg.Content.FselfOptions? fselfOpts = null;
-                    string fileName = Path.GetFileName(file);
-                    if (!fileName.Equals("eboot.bin", StringComparison.OrdinalIgnoreCase) &&
-                        applicationSceVersion != null &&
-                        !LibProsperoPkg.Content.ProsperoFself.TryGetSceVersionRecord(elfBytes, out _))
-                    {
-                        fselfOpts = new LibProsperoPkg.Content.FselfOptions
-                        {
-                            SceVersionName = Path.GetFileNameWithoutExtension(fileName),
-                            SceVersionRecord = applicationSceVersion
-                        };
-                    }
-
-                    byte[] fself = LibProsperoPkg.Content.ProsperoFself.MakeFself(elfBytes, fselfOpts);
-                    File.WriteAllBytes(file, fself);
-                    convertedCount++;
-
-                    logger?.Invoke($"[stage 0/5] Fake-signed native PS5 FSELF (0xEEF51454): {relPath} ({fself.Length:N0} bytes)");
-                }
-                catch (Exception ex)
-                {
-                    string relPath = Path.GetRelativePath(sourceDir, file);
-                    logger?.Invoke($"[stage 0/5] Warning: could not fake-sign '{relPath}': {ex.Message}");
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            logger?.Invoke($"[stage 0/5] Scan warning: {ex.Message}");
-        }
-
-        logger?.Invoke($"[stage 0/5] Pre-processing complete: {convertedCount} decrypted ELF(s) converted to FSELF{(sanitizedCount > 0 ? $", {sanitizedCount} section table(s) sanitized" : "")}.");
-        return convertedCount;
-    }
-
-    private static bool TryUnfself(byte[] selfBytes, out byte[]? elf) =>
-        LibProsperoPkg.Content.ProsperoFself.TryUnfself(selfBytes, out elf);
-
-    public static int SanitizeTruncatedElfHeaders(string sourceDir, Action<string>? logger = null)
+    public static int SanitizeTruncatedElfHeaders(string sourceDir, Action<string>? logger = null, CancellationToken cancellationToken = default)
     {
         int sanitizedCount = 0;
         try
@@ -1560,6 +1569,7 @@ public sealed class AppLogic
 
             foreach (var file in files)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
                     var fi = new FileInfo(file);
@@ -1580,6 +1590,16 @@ public sealed class AppLogic
                         long tableEnd = (long)e_shoff + ((long)e_shnum * (long)e_shentsize);
                         if (tableEnd > fi.Length || (long)e_shoff >= fi.Length)
                         {
+                            string bakPath = file + ".bak";
+                            if (!File.Exists(bakPath))
+                            {
+                                try
+                                {
+                                    File.Copy(file, bakPath, overwrite: false);
+                                }
+                                catch { }
+                            }
+
                             header.Slice(40, 8).Clear();
                             header.Slice(58, 6).Clear();
 
@@ -1604,6 +1624,196 @@ public sealed class AppLogic
         {
         }
         return sanitizedCount;
+    }
+
+    public static string FormatBytes(long bytes)
+    {
+        string[] suffixes = { "B", "KB", "MB", "GB", "TB" };
+        int counter = 0;
+        decimal number = bytes;
+        while (Math.Round(number / 1024m) >= 1m && counter < suffixes.Length - 1)
+        {
+            number /= 1024m;
+            counter++;
+        }
+        return $"{number:n2} {suffixes[counter]}";
+    }
+
+    public static long CalculateDirectorySize(string directoryPath)
+    {
+        long totalSize = 0;
+        try
+        {
+            var dirQueue = new Queue<string>();
+            dirQueue.Enqueue(directoryPath);
+
+            while (dirQueue.Count > 0)
+            {
+                string currentDir = dirQueue.Dequeue();
+                try
+                {
+                    foreach (string file in Directory.EnumerateFiles(currentDir))
+                    {
+                        try
+                        {
+                            var fi = new FileInfo(file);
+                            totalSize += fi.Length;
+                        }
+                        catch { }
+                    }
+
+                    foreach (string subDir in Directory.EnumerateDirectories(currentDir))
+                    {
+                        try
+                        {
+                            var di = new DirectoryInfo(subDir);
+                            if (!di.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                            {
+                                dirQueue.Enqueue(subDir);
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+            }
+        }
+        catch { }
+        return totalSize;
+    }
+
+    public static (bool Success, long FreeSpace, string Name, string MountPoint) GetDiskSpace(string targetPath)
+    {
+        try
+        {
+            string fullPath = Path.GetFullPath(targetPath);
+            string? current = fullPath;
+            while (!string.IsNullOrEmpty(current) && !Directory.Exists(current) && !File.Exists(current))
+            {
+                current = Path.GetDirectoryName(current);
+            }
+            if (string.IsNullOrEmpty(current))
+            {
+                current = Path.GetPathRoot(fullPath) ?? "/";
+            }
+
+            DriveInfo dInfo;
+            try
+            {
+                dInfo = new DriveInfo(current);
+            }
+            catch
+            {
+                string root = Path.GetPathRoot(fullPath) ?? "/";
+                dInfo = new DriveInfo(root);
+            }
+
+            if (dInfo.IsReady)
+            {
+                string label = !string.IsNullOrWhiteSpace(dInfo.VolumeLabel) ? dInfo.VolumeLabel : dInfo.Name;
+                return (true, dInfo.AvailableFreeSpace, label, dInfo.RootDirectory.FullName);
+            }
+        }
+        catch
+        {
+        }
+        return (false, 0L, "Unknown", "/");
+    }
+
+    public static bool CheckDiskSpaceBeforeBuild(string sourceDir, string outputDir, out string? errorMessage, out string? logSummary)
+    {
+        errorMessage = null;
+        logSummary = null;
+
+        long sourceBytes = CalculateDirectorySize(sourceDir);
+        if (sourceBytes <= 0)
+        {
+            if (!Directory.EnumerateFileSystemEntries(sourceDir).Any())
+            {
+                errorMessage = "Source directory is empty. Please select a valid PS5 game or application folder.";
+                return false;
+            }
+        }
+
+        // Safety reserve: at least 2 GB or 5% of game size to prevent drive from hitting 100% capacity
+        long safetyReserve = Math.Max(2L * 1024 * 1024 * 1024, (long)(sourceBytes * 0.05));
+
+        // Required space components:
+        // 1. Output directory needs: final .pkg (~1x source size + container overhead ~512MB)
+        long requiredOutputSpace = sourceBytes + (512L * 1024 * 1024);
+
+        // 2. Temp directory needs: inner pfs_image.dat (~1x) + outer.pfs (~1x) + layout/metadata (~512MB)
+        long requiredTempSpace = (sourceBytes * 2L) + (512L * 1024 * 1024);
+
+        string tempPath = Path.GetTempPath();
+        var outputDisk = GetDiskSpace(outputDir);
+        var tempDisk = GetDiskSpace(tempPath);
+
+        bool sameDrive = outputDisk.Success && tempDisk.Success &&
+            string.Equals(outputDisk.MountPoint, tempDisk.MountPoint, StringComparison.OrdinalIgnoreCase);
+
+        // Verify write access to output directory
+        try
+        {
+            Directory.CreateDirectory(outputDir);
+            string testFile = Path.Combine(outputDir, ".prospero_disk_test_" + Guid.NewGuid().ToString("N"));
+            File.WriteAllBytes(testFile, new byte[16]);
+            File.Delete(testFile);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Output directory '{outputDir}' is not writable: {ex.Message}. Please check folder permissions.";
+            return false;
+        }
+
+        if (sameDrive)
+        {
+            long totalRequired = requiredOutputSpace + requiredTempSpace + safetyReserve;
+            logSummary = $"[DISK] Disk check: {FormatBytes(outputDisk.FreeSpace)} free on '{outputDisk.Name}' ({outputDisk.MountPoint}). Required: {FormatBytes(totalRequired)} (PKG: {FormatBytes(requiredOutputSpace)}, Temp: {FormatBytes(requiredTempSpace)}, Reserve: {FormatBytes(safetyReserve)}).";
+
+            if (outputDisk.FreeSpace < totalRequired)
+            {
+                long deficit = totalRequired - outputDisk.FreeSpace;
+                errorMessage = $"Insufficient disk space on drive '{outputDisk.Name}' ({outputDisk.MountPoint})!\n" +
+                               $"• Game Dump Size: {FormatBytes(sourceBytes)}\n" +
+                               $"• Required Free Space: {FormatBytes(totalRequired)} (PKG: {FormatBytes(requiredOutputSpace)}, Temp: {FormatBytes(requiredTempSpace)}, Reserve: {FormatBytes(safetyReserve)})\n" +
+                               $"• Currently Available: {FormatBytes(outputDisk.FreeSpace)}\n" +
+                               $"• Shortage: Need at least {FormatBytes(deficit)} more free space.\n" +
+                               $"Please free up disk space or select an output folder on an external drive.";
+                return false;
+            }
+        }
+        else
+        {
+            long totalOutputRequired = requiredOutputSpace + safetyReserve;
+            long totalTempRequired = requiredTempSpace + safetyReserve;
+
+            logSummary = $"[DISK] Disk check: Output drive '{outputDisk.Name}' has {FormatBytes(outputDisk.FreeSpace)} free (Needs {FormatBytes(totalOutputRequired)}), System temp drive '{tempDisk.Name}' has {FormatBytes(tempDisk.FreeSpace)} free (Needs {FormatBytes(totalTempRequired)}).";
+
+            if (outputDisk.Success && outputDisk.FreeSpace < totalOutputRequired)
+            {
+                long deficit = totalOutputRequired - outputDisk.FreeSpace;
+                errorMessage = $"Insufficient disk space on output drive '{outputDisk.Name}' ({outputDisk.MountPoint})!\n" +
+                               $"• Required for PKG + Reserve: {FormatBytes(totalOutputRequired)}\n" +
+                               $"• Currently Available: {FormatBytes(outputDisk.FreeSpace)}\n" +
+                               $"• Shortage: Need at least {FormatBytes(deficit)} more free space on this drive.\n" +
+                               $"Please free up disk space on the output drive.";
+                return false;
+            }
+
+            if (tempDisk.Success && tempDisk.FreeSpace < totalTempRequired)
+            {
+                long deficit = totalTempRequired - tempDisk.FreeSpace;
+                errorMessage = $"Insufficient disk space on system temporary volume '{tempDisk.Name}' ({tempDisk.MountPoint})!\n" +
+                               $"• Required for temporary build images: {FormatBytes(totalTempRequired)}\n" +
+                               $"• Currently Available: {FormatBytes(tempDisk.FreeSpace)}\n" +
+                               $"• Shortage: Need at least {FormatBytes(deficit)} more free space on your system drive.\n" +
+                               $"Please free up disk space on your system volume.";
+                return false;
+            }
+        }
+
+        return true;
     }
 }
 

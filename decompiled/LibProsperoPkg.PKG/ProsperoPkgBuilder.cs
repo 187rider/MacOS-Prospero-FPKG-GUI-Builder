@@ -374,6 +374,50 @@ public static class ProsperoPkgBuilder
 	{
 		bool flag = props.PublisherImageMode == ProsperoPublisherImageMode.PlaintextNoAuth;
 		log(flag ? "Preparing PLAINTEXT_NOAUTH publisher PPR-PFS and NAPS image..." : "Preparing native publisher data-first PPR-PFS and NAPS image...");
+
+		// Pre-flight check: Verify sufficient disk space with safety reserve
+		try
+		{
+			long sourceBytes = innerRoot.GetAllChildrenFiles().Sum((FSFile f) => f.Size);
+			long safetyReserve = Math.Max(2L * 1024 * 1024 * 1024, (long)(sourceBytes * 0.05));
+			long requiredOutputSpace = sourceBytes + 536870912L;
+			long requiredTempSpace = (sourceBytes * 2L) + 536870912L;
+
+			string tempPath = Path.GetTempPath();
+			string outDir = Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? "/";
+			DriveInfo outDrive = new DriveInfo(outDir);
+			DriveInfo tempDrive = new DriveInfo(tempPath);
+
+			bool sameDrive = string.Equals(outDrive.RootDirectory.FullName, tempDrive.RootDirectory.FullName, StringComparison.OrdinalIgnoreCase);
+			if (sameDrive)
+			{
+				long totalRequired = requiredOutputSpace + requiredTempSpace + safetyReserve;
+				if (outDrive.AvailableFreeSpace < totalRequired)
+				{
+					throw new IOException($"Insufficient disk space on drive '{outDrive.Name}' ({outDrive.RootDirectory.FullName}). Required: {(double)totalRequired / 1073741824:F2} GB (including safety reserve), Available: {(double)outDrive.AvailableFreeSpace / 1073741824:F2} GB.");
+				}
+			}
+			else
+			{
+				if (outDrive.AvailableFreeSpace < (requiredOutputSpace + safetyReserve))
+				{
+					throw new IOException($"Insufficient disk space on output drive '{outDrive.Name}'. Required: {(double)(requiredOutputSpace + safetyReserve) / 1073741824:F2} GB, Available: {(double)outDrive.AvailableFreeSpace / 1073741824:F2} GB.");
+				}
+				if (tempDrive.AvailableFreeSpace < (requiredTempSpace + safetyReserve))
+				{
+					throw new IOException($"Insufficient disk space on temp volume '{tempDrive.Name}'. Required: {(double)(requiredTempSpace + safetyReserve) / 1073741824:F2} GB, Available: {(double)tempDrive.AvailableFreeSpace / 1073741824:F2} GB.");
+				}
+			}
+		}
+		catch (IOException)
+		{
+			throw;
+		}
+		catch
+		{
+			// DriveInfo might fail on unusual virtual filesystems, allow proceed
+		}
+
 		long num = ToUnixSeconds(props.TimeStamp);
 		string text = Path.Combine(Path.GetTempPath(), "libprospero-publisher-" + Guid.NewGuid().ToString("N"));
 		string text2 = text + ".pfs_image.dat";
@@ -487,6 +531,7 @@ public static class ProsperoPkgBuilder
 				int num10;
 				while ((num10 = fileStream2.Read(array5, 0, array5.Length)) > 0)
 				{
+					props.CancellationToken.ThrowIfCancellationRequested();
 					fileStream.Write(array5, 0, num10);
 					num9 += num10;
 					if ((num9 & 0x1FFFFFF) == 0L)
@@ -1027,7 +1072,10 @@ public static class ProsperoPkgBuilder
 			foreach (string item2 in Directory.EnumerateFiles(path).OrderBy(Path.GetFileName, StringComparer.Ordinal))
 			{
 				string fileName = Path.GetFileName(item2);
-				if (!fileName.EndsWith(".gp4", StringComparison.OrdinalIgnoreCase) && !fileName.EndsWith(".gp5", StringComparison.OrdinalIgnoreCase))
+				if (!fileName.EndsWith(".gp4", StringComparison.OrdinalIgnoreCase) &&
+				    !fileName.EndsWith(".gp5", StringComparison.OrdinalIgnoreCase) &&
+				    !fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) &&
+				    !fileName.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase))
 				{
 					string relativePath2 = Path.GetRelativePath(sourceRoot, item2);
 					if (!IsExcluded(fileName, relativePath2, readOnlyList5) && !IsExcluded(fileName, relativePath2, readOnlyList6))
@@ -1899,9 +1947,16 @@ public static class ProsperoPkgBuilder
 				sdkVersion = 311029849265274880uL;
 			}
 			ulong num = sdkVersion;
-			jsonObject["sdkVersion"] = VersionText(num);
-			ulong value = Math.Max(Math.Min(HexVersion(jsonObject["requiredSystemSoftwareVersion"]), 648518346341351424uL), num);
-			jsonObject["requiredSystemSoftwareVersion"] = VersionText(value);
+			if (jsonObject["sdkVersion"] == null || string.IsNullOrWhiteSpace(jsonObject["sdkVersion"]?.ToString()))
+			{
+				jsonObject["sdkVersion"] = VersionText(num);
+			}
+			ulong reqFw = HexVersion(jsonObject["requiredSystemSoftwareVersion"]);
+			if (reqFw == 0)
+			{
+				ulong value = Math.Max(Math.Min(reqFw, 648518346341351424uL), num);
+				jsonObject["requiredSystemSoftwareVersion"] = VersionText(value);
+			}
 			JsonObject jsonObject4 = jsonObject;
 			if (jsonObject4["applicationDrmType"] == null)
 			{
@@ -2064,6 +2119,11 @@ public static class ProsperoPkgBuilder
 			{
 				foreach (string item in Directory.EnumerateFiles(text2, "*", SearchOption.AllDirectories))
 				{
+					string fileName = Path.GetFileName(item);
+					if (fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase))
+					{
+						continue;
+					}
 					string key = Path.GetRelativePath(text2, item).Replace('\\', '/');
 					sortedDictionary.Add(key, Path.GetFullPath(item));
 				}
@@ -2085,7 +2145,8 @@ public static class ProsperoPkgBuilder
 				{
 					string text5 = Path.GetRelativePath(text3, item2).Replace('\\', '/');
 					string fileName = Path.GetFileName(item2);
-					if (!MatchesGp5Exclude(fileName, text5, masks) && !MatchesGp5Exclude(fileName, text5, array) && !IsInGp5ExcludedDirectory(text5, dirMasks, array))
+					if (!MatchesGp5Exclude(fileName, text5, masks) && !MatchesGp5Exclude(fileName, text5, array) && !IsInGp5ExcludedDirectory(text5, dirMasks, array) &&
+					    !fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) && !fileName.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase))
 					{
 						string key2 = Path.GetRelativePath(text4, item2).Replace('\\', '/');
 						sortedDictionary[key2] = Path.GetFullPath(item2);

@@ -34,8 +34,13 @@ public sealed class SceSysQuarantine : IDisposable
         _backupDir = backupDir;
     }
 
-    public static SceSysQuarantine Apply(string sourceDir, Action<string>? logger = null)
+    public static SceSysQuarantine Apply(string sourceDir, Action<string>? logger = null, bool disabled = false)
     {
+        if (disabled)
+        {
+            return new SceSysQuarantine(sourceDir, "");
+        }
+
         string backupDir = Path.Combine(Path.GetTempPath(), $"fpkg-quarantine-{Guid.NewGuid():N}");
         Directory.CreateDirectory(backupDir);
 
@@ -98,7 +103,7 @@ public sealed class SceSysQuarantine : IDisposable
             }
         }
 
-        // Also quarantine tree-wide backup files (.esbak, .gp4, .gp5) that leak into inner image
+        // Also quarantine tree-wide backup files (.bak, .esbak, .gp4, .gp5) that leak into inner image
         try
         {
             var rootDirInfo = new DirectoryInfo(sourceDir);
@@ -106,7 +111,7 @@ public sealed class SceSysQuarantine : IDisposable
             {
                 if (fi.FullName.StartsWith(backupDir, StringComparison.OrdinalIgnoreCase)) continue;
                 string ext = fi.Extension.ToLowerInvariant();
-                if (ext is ".esbak" or ".gp4" or ".gp5")
+                if (ext is ".esbak" or ".gp4" or ".gp5" or ".bak" || fi.Name.EndsWith(".bak", StringComparison.OrdinalIgnoreCase))
                 {
                     string rel = Path.GetRelativePath(sourceDir, fi.FullName);
                     string dest = Path.Combine(backupDir, "treewide_" + Guid.NewGuid().ToString("N") + "_" + fi.Name);
