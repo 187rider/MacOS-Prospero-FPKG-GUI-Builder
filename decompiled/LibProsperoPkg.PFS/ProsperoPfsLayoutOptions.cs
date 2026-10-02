@@ -141,5 +141,5 @@ public sealed class ProsperoPfsLayoutOptions
 	public IReadOnlyCollection<string> ExcludeFileSuffixes { get; set; } = DefaultExcludeFileSuffixes;
 
 	/// <summary>The default file-suffix exclude set.</summary>
-	public static IReadOnlyCollection<string> DefaultExcludeFileSuffixes { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".gp4", ".gp5", ".esbak", ".dds" };
+	public static IReadOnlyCollection<string> DefaultExcludeFileSuffixes { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".gp4", ".gp5", ".esbak", ".bak", ".dds" };
 }

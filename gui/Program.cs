@@ -28,9 +28,16 @@ internal static class Program
             .Center()
             .SetContextMenuEnabled(true)
             .SetDevToolsEnabled(true)
-            .SetResizable(true);
+            .SetResizable(true)
+            .SetFileSystemAccessEnabled(true)
+            .SetGrantBrowserPermissions(true);
 
         var logic = new AppLogic(window);
+
+        MacDragDropBridge.Initialize((paths, x, y) =>
+        {
+            logic.HandleNativeFilesDropped(paths, x, y);
+        });
 
         window.RegisterWindowClosingHandler((sender, e) =>
         {

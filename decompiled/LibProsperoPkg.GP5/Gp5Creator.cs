@@ -67,6 +67,14 @@ public static class Gp5Creator
 		gp5Project.FilesSpecified = true;
 		foreach (string item in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).OrderBy((string path) => Path.GetRelativePath(root, path), StringComparer.Ordinal))
 		{
+			string fileName = Path.GetFileName(item);
+			if (fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
+			    fileName.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase) ||
+			    fileName.EndsWith(".gp4", StringComparison.OrdinalIgnoreCase) ||
+			    fileName.EndsWith(".gp5", StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
 			string destinationPath = Path.GetRelativePath(root, item).Replace(Path.DirectorySeparatorChar, '\\').Replace(Path.AltDirectorySeparatorChar, '\\');
 			gp5Project.Files.Add(new Gp5File
 			{

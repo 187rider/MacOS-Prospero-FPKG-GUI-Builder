@@ -26,6 +26,7 @@
   const metadataBanner = document.getElementById('metadata-banner');
   const metaTitleText = document.getElementById('meta-title-text');
   const metaPlaygoText = document.getElementById('meta-playgo-text');
+  const metaDiskText = document.getElementById('meta-disk-text');
 
   const inputContentId = document.getElementById('input-content-id');
   const inputTitle = document.getElementById('input-title');
@@ -40,6 +41,9 @@
   const chkVerify = document.getElementById('chk-verify');
   const chkFself = document.getElementById('chk-fself');
   const chkBackport = document.getElementById('chk-backport');
+  const selectBackportSdk = document.getElementById('select-backport-sdk');
+  const backportSdkContainer = document.getElementById('backport-sdk-container');
+  const chkAlreadyPatched = document.getElementById('chk-already-patched');
 
   const btnBuild = document.getElementById('btn-build');
   const btnCancel = document.getElementById('btn-cancel');
@@ -139,6 +143,10 @@
   // --- Host Message Router ---
   function handleHostMessage(type, data) {
     switch (type) {
+      case 'nativeFilesDropped':
+        handleNativeFilesDropped(data.paths, data.x, data.y);
+        break;
+
       case 'folderSelected':
         if (data.target === 'source') {
           inputSource.value = data.path;
@@ -176,6 +184,21 @@
 
         metaTitleText.textContent = `Title: ${data.title} (${data.titleId})`;
         metaPlaygoText.textContent = data.playgoStatus;
+
+        if (metaDiskText) {
+          if (data.sourceSizeFormatted && data.freeSpaceFormatted) {
+            metaDiskText.style.display = 'inline-flex';
+            if (data.hasEnoughSpace) {
+              metaDiskText.className = 'meta-disk success';
+              metaDiskText.innerHTML = `💾 Dump Size: <strong>${data.sourceSizeFormatted}</strong> • Free Disk: <strong>${data.freeSpaceFormatted}</strong> (Required: ~${data.requiredSpaceFormatted})`;
+            } else {
+              metaDiskText.className = 'meta-disk warning';
+              metaDiskText.innerHTML = `⚠️ Low Free Space! Available: <strong>${data.freeSpaceFormatted}</strong> • Required: <strong>~${data.requiredSpaceFormatted}</strong> (Game: ${data.sourceSizeFormatted})`;
+            }
+          } else {
+            metaDiskText.style.display = 'none';
+          }
+        }
         break;
 
       case 'buildStarted':
@@ -237,6 +260,10 @@
         resetBuildButtons();
         setGlobalStatus('ready', 'Build Cancelled');
         if (globalTopProgress) globalTopProgress.style.display = 'none';
+        buildResultBanner.style.display = 'flex';
+        buildResultBanner.className = 'result-banner warning';
+        resultTitle.textContent = 'Build Cancelled';
+        resultMetrics.textContent = data.message || 'Build was cancelled by user. Temporary files cleared.';
         appendLog('[CANCEL] ' + (data.message || 'Build was cancelled by user. Temporary files cleared.'), 'warning');
         break;
 
@@ -295,15 +322,21 @@
   }
 
   // --- Tab Switching ---
+  function switchTab(tabId) {
+    tabButtons.forEach(b => {
+      if (b.getAttribute('data-tab') === tabId) b.classList.add('active');
+      else b.classList.remove('active');
+    });
+    tabPanes.forEach(p => {
+      if (p.id === `pane-${tabId}`) p.classList.add('active');
+      else p.classList.remove('active');
+    });
+  }
+
   tabButtons.forEach(btn => {
     btn.addEventListener('click', () => {
       const tabId = btn.getAttribute('data-tab');
-      tabButtons.forEach(b => b.classList.remove('active'));
-      tabPanes.forEach(p => p.classList.remove('active'));
-
-      btn.classList.add('active');
-      const pane = document.getElementById(`pane-${tabId}`);
-      if (pane) pane.classList.add('active');
+      switchTab(tabId);
     });
   });
 
@@ -379,16 +412,81 @@
       cpuMode: selectCpuMode ? selectCpuMode.value : 'cool',
       deterministic,
       verify,
-      autoFself,
-      autoBackport: chkBackport ? chkBackport.checked : true
+      autoFself: chkAlreadyPatched && chkAlreadyPatched.checked ? false : autoFself,
+      autoBackport: chkAlreadyPatched && chkAlreadyPatched.checked ? false : (chkBackport ? chkBackport.checked : true),
+      alreadyPatched: chkAlreadyPatched ? chkAlreadyPatched.checked : false,
+      targetSdk: selectBackportSdk ? selectBackportSdk.value : '0x0400000000000000'
     });
   });
+
+  if (chkAlreadyPatched) {
+    let savedFself = chkFself ? chkFself.checked : true;
+    let savedBackport = chkBackport ? chkBackport.checked : true;
+
+    chkAlreadyPatched.addEventListener('change', () => {
+      const isPatched = chkAlreadyPatched.checked;
+      if (isPatched) {
+        if (chkFself) {
+          savedFself = chkFself.checked;
+          chkFself.checked = false;
+          chkFself.disabled = true;
+          if (chkFself.parentElement) chkFself.parentElement.style.opacity = '0.35';
+        }
+        if (chkBackport) {
+          savedBackport = chkBackport.checked;
+          chkBackport.checked = false;
+          chkBackport.disabled = true;
+          if (chkBackport.parentElement) chkBackport.parentElement.style.opacity = '0.35';
+        }
+        if (selectBackportSdk) selectBackportSdk.disabled = true;
+        if (backportSdkContainer) {
+          backportSdkContainer.style.opacity = '0.3';
+          backportSdkContainer.style.pointerEvents = 'none';
+        }
+      } else {
+        if (chkFself) {
+          chkFself.disabled = false;
+          chkFself.checked = savedFself;
+          if (chkFself.parentElement) chkFself.parentElement.style.opacity = '1';
+        }
+        if (chkBackport) {
+          chkBackport.disabled = false;
+          chkBackport.checked = savedBackport;
+          if (chkBackport.parentElement) chkBackport.parentElement.style.opacity = '1';
+        }
+        if (selectBackportSdk) selectBackportSdk.disabled = !savedBackport;
+        if (backportSdkContainer) {
+          backportSdkContainer.style.opacity = savedBackport ? '1' : '0.45';
+          backportSdkContainer.style.pointerEvents = savedBackport ? 'auto' : 'none';
+        }
+      }
+    });
+  }
+
+  if (chkBackport && selectBackportSdk) {
+    chkBackport.addEventListener('change', () => {
+      selectBackportSdk.disabled = !chkBackport.checked;
+      if (backportSdkContainer) {
+        backportSdkContainer.style.opacity = chkBackport.checked ? '1' : '0.45';
+        backportSdkContainer.style.pointerEvents = chkBackport.checked ? 'auto' : 'none';
+      }
+    });
+  }
 
   if (btnCancel) {
     btnCancel.addEventListener('click', () => {
       btnCancel.disabled = true;
-      btnCancel.innerHTML = `<span>Cancelling...</span>`;
+      btnCancel.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" class="spin"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4" stroke-dashoffset="10"></circle></svg><span>Cancelling...</span>`;
       sendToHost('cancelBuild');
+
+      // Safety UI recovery timeout: if host does not respond within 5s, unlock UI
+      setTimeout(() => {
+        if (!isBuilding) return;
+        resetBuildButtons();
+        setGlobalStatus('ready', 'Build Cancelled');
+        if (globalTopProgress) globalTopProgress.style.display = 'none';
+        appendLog('[CANCEL] UI reset after cancellation request.', 'warning');
+      }, 5000);
     });
   }
 
@@ -659,6 +757,290 @@
       "'": '&#39;',
       '"': '&quot;'
     }[tag] || tag));
+  }
+
+  // --- Drag and Drop Management (Native macOS Bridge + WebKit Event Handlers) ---
+  let activeHoverTargetKey = null;
+  let activeHoverTimestamp = 0;
+  let lastDroppedTargetKey = null;
+  let lastDroppedTimestamp = 0;
+
+  function flashInput(element) {
+    if (!element) return;
+    element.classList.remove('input-drop-highlight');
+    void element.offsetWidth; // Force CSS reflow
+    element.classList.add('input-drop-highlight');
+    setTimeout(() => {
+      element.classList.remove('input-drop-highlight');
+    }, 850);
+  }
+
+  function applyDropAction(targetKey, path) {
+    if (!path) return;
+    console.log(`[DragDrop] Applying dropped path "${path}" to target "${targetKey}"`);
+
+    switch (targetKey) {
+      case 'source':
+        if (inputSource) {
+          inputSource.value = path;
+          inputSource.dispatchEvent(new Event('change'));
+          flashInput(inputSource);
+          if (inputOutput && !inputOutput.value) {
+            inputOutput.value = path + '_output';
+            inputOutput.dispatchEvent(new Event('change'));
+          }
+        }
+        break;
+
+      case 'output':
+        if (inputOutput) {
+          inputOutput.value = path;
+          inputOutput.dispatchEvent(new Event('change'));
+          flashInput(inputOutput);
+        }
+        break;
+
+      case 'inspect':
+        if (inspectPkgPath) {
+          inspectPkgPath.value = path;
+          inspectPkgPath.dispatchEvent(new Event('change'));
+          flashInput(inspectPkgPath);
+        }
+        runInspect(path);
+        break;
+
+      case 'unpackPkg':
+        if (unpackPkgPath) {
+          unpackPkgPath.value = path;
+          unpackPkgPath.dispatchEvent(new Event('change'));
+          flashInput(unpackPkgPath);
+        }
+        if (unpackOutDir && !unpackOutDir.value) {
+          unpackOutDir.value = path.replace(/\.pkg$/i, '') + '-unpacked';
+          unpackOutDir.dispatchEvent(new Event('change'));
+        }
+        loadPkgInfo(path);
+        break;
+
+      case 'unpackDir':
+        if (unpackOutDir) {
+          unpackOutDir.value = path;
+          unpackOutDir.dispatchEvent(new Event('change'));
+          flashInput(unpackOutDir);
+        }
+        break;
+    }
+  }
+
+  function handleNativeFilesDropped(paths, x, y) {
+    // Clear all lingering visual states
+    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+
+    if (!paths || paths.length === 0) return;
+    const path = paths[0];
+    const isPkg = /\.pkg$/i.test(path);
+
+    console.log(`[DragDrop] Native drop received: "${path}" at (${x}, ${y})`);
+
+    let chosenTarget = null;
+    const now = Date.now();
+
+    // 1. Check if a specific target element registered a recent drop or dragover
+    if (lastDroppedTargetKey && (now - lastDroppedTimestamp < 1500)) {
+      chosenTarget = lastDroppedTargetKey;
+    } else if (activeHoverTargetKey && (now - activeHoverTimestamp < 1500)) {
+      chosenTarget = activeHoverTargetKey;
+    }
+
+    // 2. Use document.elementFromPoint if coordinates were provided
+    if (!chosenTarget && x > 0 && y > 0) {
+      const el = document.elementFromPoint(x, y);
+      if (el) {
+        if (el.closest('#input-source, [data-drop-target="source"]')) {
+          chosenTarget = 'source';
+        } else if (el.closest('#input-output, [data-drop-target="output"]')) {
+          chosenTarget = 'output';
+        } else if (el.closest('#inspect-pkg-path, #inspect-placeholder, [data-drop-target="inspect"], #pane-inspect')) {
+          chosenTarget = 'inspect';
+        } else if (el.closest('#unpack-pkg-path, [data-drop-target="unpackPkg"]')) {
+          chosenTarget = 'unpackPkg';
+        } else if (el.closest('#unpack-out-dir, [data-drop-target="unpackDir"]')) {
+          chosenTarget = 'unpackDir';
+        }
+      }
+    }
+
+    // 3. Fallback based on active tab and file extension
+    if (!chosenTarget) {
+      const activePane = document.querySelector('.tab-pane.active');
+      const activeTabId = activePane ? activePane.id : 'pane-build';
+
+      if (activeTabId === 'pane-inspect') {
+        chosenTarget = 'inspect';
+      } else if (activeTabId === 'pane-unpack-verify') {
+        chosenTarget = isPkg ? 'unpackPkg' : 'unpackDir';
+      } else { // pane-build
+        if (isPkg) {
+          switchTab('inspect');
+          chosenTarget = 'inspect';
+        } else {
+          chosenTarget = 'source';
+        }
+      }
+    }
+
+    applyDropAction(chosenTarget, path);
+
+    // Reset tracking keys
+    activeHoverTargetKey = null;
+    lastDroppedTargetKey = null;
+  }
+
+  function extractPathFromDrop(e) {
+    if (!e.dataTransfer) return null;
+
+    // 1. Desktop webview with file.path (Chromium, Electron, patched webviews)
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (file.path) return file.path;
+    }
+
+    // 2. text/uri-list
+    const uriList = e.dataTransfer.getData('text/uri-list');
+    if (uriList) {
+      const lines = uriList.split(/\r?\n/);
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('file://')) {
+          try {
+            const url = new URL(trimmed);
+            let p = decodeURIComponent(url.pathname);
+            if (/^\/[a-zA-Z]:/.test(p)) p = p.substring(1);
+            return p;
+          } catch {
+            let p = decodeURIComponent(trimmed.replace(/^file:\/\//, ''));
+            if (/^\/[a-zA-Z]:/.test(p)) p = p.substring(1);
+            return p;
+          }
+        }
+      }
+    }
+
+    // 3. text/plain
+    const text = e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text');
+    if (text) {
+      const trimmed = text.trim();
+      if (trimmed.startsWith('file://')) {
+        try {
+          const url = new URL(trimmed);
+          let p = decodeURIComponent(url.pathname);
+          if (/^\/[a-zA-Z]:/.test(p)) p = p.substring(1);
+          return p;
+        } catch {
+          return decodeURIComponent(trimmed.replace(/^file:\/\//, ''));
+        }
+      }
+      if (trimmed.startsWith('/') || /^[a-zA-Z]:[\\\/]/.test(trimmed)) {
+        return trimmed;
+      }
+    }
+
+    // 4. DataTransferItemList
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      for (let i = 0; i < e.dataTransfer.items.length; i++) {
+        const item = e.dataTransfer.items[i];
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file && file.path) return file.path;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function enableDragAndDrop(element, targetKey, wrapper = null) {
+    if (!element) return;
+    const targets = [element];
+    if (wrapper && wrapper !== element) targets.push(wrapper);
+
+    targets.forEach(targetEl => {
+      targetEl.setAttribute('data-drop-target', targetKey);
+
+      ['dragenter', 'dragover'].forEach(eventName => {
+        targetEl.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.dataTransfer) {
+            e.dataTransfer.dropEffect = 'copy';
+          }
+          activeHoverTargetKey = targetKey;
+          activeHoverTimestamp = Date.now();
+          targetEl.classList.add('drag-over');
+          element.classList.add('drag-over');
+        }, false);
+      });
+
+      ['dragleave', 'dragend'].forEach(eventName => {
+        targetEl.addEventListener(eventName, (e) => {
+          if (e.relatedTarget && targetEl.contains(e.relatedTarget)) {
+            return;
+          }
+          targetEl.classList.remove('drag-over');
+          element.classList.remove('drag-over');
+        }, false);
+      });
+
+      targetEl.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        targetEl.classList.remove('drag-over');
+        element.classList.remove('drag-over');
+
+        lastDroppedTargetKey = targetKey;
+        lastDroppedTimestamp = Date.now();
+
+        // Also attempt HTML5 extraction if browser supports it
+        const path = extractPathFromDrop(e);
+        if (path) {
+          applyDropAction(targetKey, path);
+        }
+      }, false);
+    });
+  }
+
+  // Prevent default window drop navigation
+  window.addEventListener('dragover', (e) => {
+    e.preventDefault();
+  }, false);
+  window.addEventListener('drop', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+  }, false);
+
+  // Wire Drag & Drop for all Directory and File input fields
+  if (inputSource) {
+    enableDragAndDrop(inputSource, 'source', inputSource.closest('.form-group'));
+  }
+
+  if (inputOutput) {
+    enableDragAndDrop(inputOutput, 'output', inputOutput.closest('.form-group'));
+  }
+
+  if (inspectPkgPath) {
+    enableDragAndDrop(inspectPkgPath, 'inspect', inspectPkgPath.closest('.input-with-button'));
+  }
+
+  if (inspectPlaceholder) {
+    enableDragAndDrop(inspectPlaceholder, 'inspect');
+  }
+
+  if (unpackPkgPath) {
+    enableDragAndDrop(unpackPkgPath, 'unpackPkg', unpackPkgPath.closest('.unpack-form-row'));
+  }
+
+  if (unpackOutDir) {
+    enableDragAndDrop(unpackOutDir, 'unpackDir', unpackOutDir.closest('.unpack-form-row'));
   }
 
 })();

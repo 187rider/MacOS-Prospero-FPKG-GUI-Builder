@@ -332,7 +332,7 @@ public static class ProsperoPackageBuilder
 		}
 		Directory.CreateDirectory(options.OutputFolder);
 		string fullPath = Path.GetFullPath(options.SourceFolder);
-		using var quarantine = SceSysQuarantine.Apply(fullPath, action);
+		using var quarantine = SceSysQuarantine.Apply(fullPath, action, options.DisableQuarantine);
 		action($"Build configuration: mode={options.Mode}, output={options.OutputFormat}, image={options.PublisherImageMode}, PlayGo chunks={options.PlayGoChunkCount}, deterministic={options.DeterministicBuild}.");
 		action("Source: " + fullPath);
 		action("Output directory: " + Path.GetFullPath(options.OutputFolder));

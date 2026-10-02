@@ -223,6 +223,11 @@ public sealed class ProsperoPs5InnerImageAssembler
 
 	private static bool IsExcludedFromInner(string fullPath)
 	{
+		if (fullPath.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
+		    fullPath.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase))
+		{
+			return true;
+		}
 		if (!fullPath.StartsWith("/sce_sys/", StringComparison.Ordinal))
 		{
 			return false;
