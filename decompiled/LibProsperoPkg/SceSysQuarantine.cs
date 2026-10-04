@@ -36,68 +36,70 @@ public sealed class SceSysQuarantine : IDisposable
 
     public static SceSysQuarantine Apply(string sourceDir, Action<string>? logger = null, bool disabled = false)
     {
-        if (disabled)
-        {
-            return new SceSysQuarantine(sourceDir, "");
-        }
-
         string backupDir = Path.Combine(Path.GetTempPath(), $"fpkg-quarantine-{Guid.NewGuid():N}");
         Directory.CreateDirectory(backupDir);
 
         var q = new SceSysQuarantine(sourceDir, backupDir);
-        string sceSysDir = Path.Combine(sourceDir, "sce_sys");
 
-        if (Directory.Exists(sceSysDir))
+        if (!disabled)
         {
-            foreach (var name in SceSysStaleNames)
+            string sceSysDir = Path.Combine(sourceDir, "sce_sys");
+            if (Directory.Exists(sceSysDir))
             {
-                string path = Path.Combine(sceSysDir, name);
-                if (File.Exists(path))
+                foreach (var name in SceSysStaleNames)
                 {
-                    string dest = Path.Combine(backupDir, "sce_sys_" + name);
-                    try
+                    string path = Path.Combine(sceSysDir, name);
+                    if (File.Exists(path))
                     {
-                        File.Move(path, dest, overwrite: true);
-                        q._movedFiles.Add((path, dest));
-                        logger?.Invoke($"[quarantine] Staged aside conflicting retail artifact: sce_sys/{name}");
-                    }
-                    catch (Exception ex)
-                    {
-                        logger?.Invoke($"[quarantine] Warning: could not move sce_sys/{name}: {ex.Message}");
+                        string dest = Path.Combine(backupDir, "sce_sys_" + name);
+                        try
+                        {
+                            File.Move(path, dest, overwrite: true);
+                            q._movedFiles.Add((path, dest));
+                            logger?.Invoke($"[quarantine] Staged aside conflicting retail artifact: sce_sys/{name}");
+                        }
+                        catch (Exception ex)
+                        {
+                            logger?.Invoke($"[quarantine] Warning: could not move sce_sys/{name}: {ex.Message}");
+                        }
                     }
                 }
-            }
 
-            // Check and quarantine any corrupted PNG files (e.g. invalid header, truncated data)
-            foreach (var pngFile in Directory.EnumerateFiles(sceSysDir, "*.png", SearchOption.TopDirectoryOnly))
-            {
-                bool isCorrupt = false;
-                try
-                {
-                    byte[] sig = new byte[8];
-                    using var fs = new FileStream(pngFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                    if (fs.Length < 16 || fs.Read(sig, 0, 8) != 8 ||
-                        sig[0] != 0x89 || sig[1] != 0x50 || sig[2] != 0x4E || sig[3] != 0x47 ||
-                        sig[4] != 0x0D || sig[5] != 0x0A || sig[6] != 0x1A || sig[7] != 0x0A)
-                    {
-                        isCorrupt = true;
-                    }
-                }
-                catch { isCorrupt = true; }
-
-                if (isCorrupt)
+                // Check and quarantine any corrupted PNG files (e.g. invalid header, truncated data)
+                foreach (var pngFile in Directory.EnumerateFiles(sceSysDir, "*.png", SearchOption.TopDirectoryOnly))
                 {
                     string fname = Path.GetFileName(pngFile);
-                    string dest = Path.Combine(backupDir, "corrupted_" + fname);
+                    if (fname.StartsWith("._", StringComparison.Ordinal) || fname.Equals(".DS_Store", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    bool isCorrupt = false;
                     try
                     {
-                        File.Move(pngFile, dest, overwrite: true);
-                        q._movedFiles.Add((pngFile, dest));
-                        logger?.Invoke($"[quarantine] Staged aside corrupted image file: sce_sys/{fname}");
+                        byte[] sig = new byte[8];
+                        using var fs = new FileStream(pngFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                        if (fs.Length < 16 || fs.Read(sig, 0, 8) != 8 ||
+                            sig[0] != 0x89 || sig[1] != 0x50 || sig[2] != 0x4E || sig[3] != 0x47 ||
+                            sig[4] != 0x0D || sig[5] != 0x0A || sig[6] != 0x1A || sig[7] != 0x0A)
+                        {
+                            isCorrupt = true;
+                        }
                     }
-                    catch (Exception ex)
+                    catch { isCorrupt = true; }
+
+                    if (isCorrupt)
                     {
-                        logger?.Invoke($"[quarantine] Warning: could not move corrupted sce_sys/{fname}: {ex.Message}");
+                        string dest = Path.Combine(backupDir, "corrupted_" + fname);
+                        try
+                        {
+                            File.Move(pngFile, dest, overwrite: true);
+                            q._movedFiles.Add((pngFile, dest));
+                            logger?.Invoke($"[quarantine] Staged aside corrupted image file: sce_sys/{fname}");
+                        }
+                        catch (Exception ex)
+                        {
+                            logger?.Invoke($"[quarantine] Warning: could not move corrupted sce_sys/{fname}: {ex.Message}");
+                        }
                     }
                 }
             }
@@ -110,6 +112,7 @@ public sealed class SceSysQuarantine : IDisposable
             foreach (var fi in rootDirInfo.EnumerateFiles("*", SearchOption.AllDirectories))
             {
                 if (fi.FullName.StartsWith(backupDir, StringComparison.OrdinalIgnoreCase)) continue;
+                if (fi.Name.StartsWith("._", StringComparison.Ordinal) || fi.Name.Equals(".DS_Store", StringComparison.OrdinalIgnoreCase)) continue;
                 string ext = fi.Extension.ToLowerInvariant();
                 if (ext is ".esbak" or ".gp4" or ".gp5" or ".bak" || fi.Name.EndsWith(".bak", StringComparison.OrdinalIgnoreCase))
                 {

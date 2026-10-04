@@ -108,6 +108,25 @@ public sealed class AppLogic
                 case "openFolder":
                     HandleOpenFolder(root);
                     break;
+                case "stageBackport":
+                    {
+                        var cloned = root.Clone();
+                        _ = Task.Run(() => HandleStageBackport(cloned));
+                    }
+                    break;
+                case "toggleFakelib":
+                    HandleToggleFakelib(root);
+                    break;
+                case "syncFakelibs":
+                    HandleSyncFakelibs(root);
+                    break;
+                case "syncEbootPatch":
+                    HandleSyncEbootPatch(root);
+                    break;
+                case "resetFakelibs":
+                case "stageMissingFakelibs":
+                    HandleResetFakelibs(root);
+                    break;
                 case "cancelBuild":
                     HandleCancelBuild();
                     break;
@@ -146,6 +165,7 @@ public sealed class AppLogic
         {
             "source" => "Select PS5 Source Folder",
             "unpackDir" => "Select Output Directory for Unpacking",
+            "workDir" => "Select Custom Scratch / Temp Working Directory",
             _ => "Select Output Folder"
         };
 
@@ -274,6 +294,20 @@ public sealed class AppLogic
             bool autoBackport = !root.TryGetProperty("autoBackport", out var ab) || ab.GetBoolean();
             bool alreadyPatched = root.TryGetProperty("alreadyPatched", out var ap) && ap.GetBoolean();
             string targetSdkStr = root.TryGetProperty("targetSdk", out var ts) ? ts.GetString() ?? "0x0400000000000000" : "0x0400000000000000";
+
+            List<string>? excludedFakelibs = null;
+            if (root.TryGetProperty("excludedFakelibs", out var efArray) && efArray.ValueKind == JsonValueKind.Array)
+            {
+                excludedFakelibs = new List<string>();
+                foreach (var item in efArray.EnumerateArray())
+                {
+                    string? fn = item.GetString();
+                    if (!string.IsNullOrEmpty(fn) && !fn.EndsWith(".psp", StringComparison.OrdinalIgnoreCase))
+                    {
+                        excludedFakelibs.Add(fn);
+                    }
+                }
+            }
 
             ulong? targetSdkVersion = null;
             if (!alreadyPatched && autoBackport && !string.Equals(targetSdkStr, "param_only", StringComparison.OrdinalIgnoreCase))
@@ -456,11 +490,18 @@ public sealed class AppLogic
                 _ => Math.Min(4, Environment.ProcessorCount)
             };
 
+            string? workDir = root.TryGetProperty("workDir", out var wd) ? wd.GetString() : null;
+            if (string.IsNullOrWhiteSpace(workDir))
+            {
+                workDir = Path.Combine(output, ".tmp");
+            }
+
             // Exactly matching original fpkg-gui 2 ProsperoBuildOptions
             var options = new ProsperoBuildOptions
             {
                 SourceFolder = source,
                 OutputFolder = output,
+                WorkDirectory = workDir,
                 ContentId = contentId,
                 PrimaryId = contentId,
                 TitleId = titleId,
@@ -476,7 +517,7 @@ public sealed class AppLogic
                 PublisherImageMode = imageMode,
                 DeterministicBuild = deterministic,
                 GenerateParamJsonIfMissing = !alreadyPatched,
-                DisableQuarantine = alreadyPatched,
+                DisableQuarantine = false,
                 CancellationToken = ct
             };
 
@@ -486,7 +527,14 @@ public sealed class AppLogic
 
             if (alreadyPatched)
             {
-                SendResponse("buildLog", new { log = "[stage 0/5] [Direct Mode] Game dump is marked as already patched. Skipping Stage 0 (all source files remain 100% untouched).", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+                SendResponse("buildLog", new { log = "[stage 0/5] [Direct Mode] Pass-Through active: binaries and game files remain untouched.", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+                _currentStage = 0;
+                SendResponse("buildProgress", new { stage = "Stage 0/5", desc = "Validating PlayGo chunk metadata...", percent = 0 });
+                LibProsperoPkg.PlayGo.ProsperoPlayGo.ValidateAndEditPlayGoChunk(source, contentId, msg =>
+                {
+                    ct.ThrowIfCancellationRequested();
+                    SendResponse("buildLog", new { log = $"[stage 0/5] [Direct Mode] {msg}", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+                });
             }
             else if (autoFself || (autoBackport && targetSdkVersion.HasValue))
             {
@@ -511,7 +559,7 @@ public sealed class AppLogic
                 {
                     ct.ThrowIfCancellationRequested();
                     SendResponse("buildLog", new { log = msg, timestamp = DateTime.Now.ToString("HH:mm:ss") });
-                }, ct, targetSdkVersion, bundledFakelib);
+                }, ct, targetSdkVersion, bundledFakelib, excludedFakelibs);
             }
             else
             {
@@ -582,6 +630,8 @@ public sealed class AppLogic
                 warnings = buildResult.Warnings,
                 verification = verifyResult
             });
+
+            PlayCompletionSound();
         }
         catch (OperationCanceledException)
         {
@@ -1282,21 +1332,21 @@ public sealed class AppLogic
             }
             SendUnpackLog($"PlayGo layout is valid ({playgoChunks} chunks, {playgoScenarios} scenarios, {playgoExtents} extents, {playgoFiles} file mappings).");
 
-            // 5. Outer-PFS superblock ICV
-            if (map.OuterSuperblockIndex >= 0)
+            // 5. Outer-PFS superblock ICV, NAPS layout, and metadata validation
+            var valReport = ProsperoPackageArchive.ValidatePackage(fs, pkgPath);
+            foreach (var w in valReport.Warnings)
             {
-                long sbOffset = map.OuterPfsOffset + (long)map.OuterSuperblockIndex * 65536L;
-                fs.Position = sbOffset;
-                byte[] sb = new byte[65536];
-                fs.ReadExactly(sb);
-                byte[] actualIcv = ProsperoOuterPfsSignature.ComputeSuperblockIcv(sb);
-                byte[] expectedIcv = sb.AsSpan(896, 32).ToArray();
-                if (!actualIcv.AsSpan().SequenceEqual(expectedIcv))
-                {
-                    throw new InvalidDataException("Outer PFS superblock ICV mismatch.");
-                }
+                SendUnpackLog($"[WARNING] {w}");
             }
-            SendUnpackLog("Outer-PFS superblock ICV, NAPS layout, and inner-PFS inode metadata are valid.");
+            if (!valReport.IsValid)
+            {
+                foreach (var err in valReport.Errors)
+                {
+                    SendUnpackLog($"[ERROR] {err}");
+                }
+                throw new InvalidDataException("Package validation failed: " + string.Join("; ", valReport.Errors));
+            }
+            SendUnpackLog($"Outer-PFS superblock ICV, NAPS layout ({valReport.NapsSpanCount ?? 0} spans), and param.json are strictly valid.");
 
             // 6. SI central directory
             int siFiles = 0;
@@ -1454,61 +1504,19 @@ public sealed class AppLogic
 
     private static PackageVerification VerifyPackageDirect(string packagePath, ProsperoPublisherImageMode expectedMode)
     {
-        ProsperoPkgType? type = ProsperoPkgReader.DetectType(packagePath);
-        using FileStream stream = new FileStream(packagePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4 * 1024 * 1024, FileOptions.SequentialScan);
-
-        if (stream.Length < 4096)
+        var report = ProsperoPackageArchive.ValidatePackage(packagePath, computeSha256: true, expectedMode: expectedMode);
+        if (!report.IsValid)
         {
-            throw new InvalidDataException("The package file is too small to contain an FIH.");
+            throw new InvalidDataException("Package verification failed: " + string.Join("; ", report.Errors));
         }
 
-        Span<byte> buffer = stackalloc byte[48];
-        stream.ReadExactly(buffer);
-
-        if (!buffer.Slice(0, 4).SequenceEqual("\u007fFIH"u8))
-        {
-            throw new InvalidDataException("The package file does not contain a valid FIH header.");
-        }
-
-        byte signedByte = buffer[5];
-        if (signedByte != 0)
-        {
-            throw new InvalidDataException($"Expected debug FIH signed byte 0x00, got 0x{signedByte:X2}.");
-        }
-
-        long outerOffset = checked((long)BinaryPrimitives.ReadUInt64LittleEndian(buffer.Slice(32, 8)));
-        if (outerOffset < 0 || outerOffset + 896 > stream.Length)
-        {
-            throw new InvalidDataException("FIH contains an invalid outer superblock offset.");
-        }
-
-        stream.Position = outerOffset + 28;
-        Span<byte> modeSpan = stackalloc byte[2];
-        stream.ReadExactly(modeSpan);
-        ushort outerMode = BinaryPrimitives.ReadUInt16LittleEndian(modeSpan);
-        if (outerMode != 13)
-        {
-            throw new InvalidDataException($"Expected publisher outer PFS mode 0x000D, got 0x{outerMode:X4}.");
-        }
-
-        stream.Position = outerOffset + 880;
-        byte[] seedBytes = new byte[16];
-        stream.ReadExactly(seedBytes);
-        string? seedMarker = null;
-
-        if (expectedMode == ProsperoPublisherImageMode.PlaintextNoAuth)
-        {
-            seedMarker = Encoding.ASCII.GetString(seedBytes);
-            if (!string.Equals(seedMarker, "PPRPLAIN-NOAUTH!", StringComparison.Ordinal))
-            {
-                throw new InvalidDataException("The outer PFS does not contain the PLAINTEXT_NOAUTH marker.");
-            }
-        }
-
-        stream.Position = 0;
-        string sha = Convert.ToHexString(SHA256.HashData(stream));
-
-        return new PackageVerification(type?.ToString() ?? "Unknown", stream.Length, signedByte, outerMode, seedMarker, sha);
+        return new PackageVerification(
+            report.ContainerType,
+            report.FileSize,
+            report.SignedByte,
+            report.OuterMode,
+            report.SeedMarker,
+            report.Sha256 ?? string.Empty);
     }
 
     private static string? NormalizeVersion(string? raw)
@@ -1554,8 +1562,398 @@ public sealed class AppLogic
         return null;
     }
 
-    public static int RecursiveMakeFself(string sourceDir, Action<string>? logger = null, CancellationToken cancellationToken = default, ulong? targetSdkVersion = null, string? bundledFakelibDir = null) =>
-        LibProsperoPkg.Content.ProsperoFself.RecursiveMakeFself(sourceDir, logger, cancellationToken, targetSdkVersion, bundledFakelibDir);
+    public static int RecursiveMakeFself(string sourceDir, Action<string>? logger = null, CancellationToken cancellationToken = default, ulong? targetSdkVersion = null, string? bundledFakelibDir = null, IEnumerable<string>? excludedFakelibs = null) =>
+        LibProsperoPkg.Content.ProsperoFself.RecursiveMakeFself(sourceDir, logger, cancellationToken, targetSdkVersion, bundledFakelibDir, excludedFakelibs);
+
+    private void HandleStageBackport(JsonElement root)
+    {
+        try
+        {
+            string source = root.GetProperty("source").GetString() ?? "";
+            string targetSdkStr = root.TryGetProperty("targetSdk", out var ts) ? ts.GetString() ?? "0x0400000000000000" : "0x0400000000000000";
+
+            if (string.IsNullOrWhiteSpace(source) || !Directory.Exists(source))
+            {
+                SendResponse("backportError", new { message = "Source folder does not exist." });
+                return;
+            }
+
+            source = Path.GetFullPath(source);
+            ulong? targetSdkVersion = null;
+            if (!string.Equals(targetSdkStr, "param_only", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    string cleanHex = targetSdkStr.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                        ? targetSdkStr.Substring(2)
+                        : targetSdkStr;
+                    targetSdkVersion = Convert.ToUInt64(cleanHex, 16);
+                }
+                catch
+                {
+                    targetSdkVersion = 0x0400000000000000uL;
+                }
+            }
+
+            SendResponse("buildLog", new { log = $"[Backport] Starting backport & fakelib scan for: {source} (Target SDK: {targetSdkStr})...", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+
+            // Automatically patch param.json
+            string sceSysDir = Path.Combine(source, "sce_sys");
+            Directory.CreateDirectory(sceSysDir);
+            string[] sysFileNames = { "param.json", "icon0.png", "icon0.dds", "pic0.png", "pic0.dds" };
+            foreach (var sfn in sysFileNames)
+            {
+                string rootFile = Path.Combine(source, sfn);
+                string targetFile = Path.Combine(sceSysDir, sfn);
+                if (File.Exists(rootFile) && !File.Exists(targetFile))
+                {
+                    File.Copy(rootFile, targetFile, overwrite: true);
+                }
+            }
+
+            string targetParamJson = Path.Combine(sceSysDir, "param.json");
+            if (File.Exists(targetParamJson))
+            {
+                try
+                {
+                    string jsonContent = File.ReadAllText(targetParamJson);
+                    var jsonNode = System.Text.Json.Nodes.JsonNode.Parse(jsonContent);
+                    if (jsonNode is System.Text.Json.Nodes.JsonObject jObj)
+                    {
+                        bool modified = false;
+                        if (!jObj.TryGetPropertyValue("requiredSystemSoftwareVersion", out var fwNode) ||
+                            !string.Equals(fwNode?.ToString(), "0x0100000000000000", StringComparison.OrdinalIgnoreCase))
+                        {
+                            jObj["requiredSystemSoftwareVersion"] = "0x0100000000000000";
+                            modified = true;
+                        }
+
+                        if (jObj.ContainsKey("targetSystemSoftwareVersion"))
+                        {
+                            jObj.Remove("targetSystemSoftwareVersion");
+                            modified = true;
+                        }
+
+                        if (targetSdkVersion.HasValue)
+                        {
+                            string targetHex = $"0x{targetSdkVersion.Value:X16}";
+                            if (!jObj.TryGetPropertyValue("sdkVersion", out var sdkNode) ||
+                                !string.Equals(sdkNode?.ToString(), targetHex, StringComparison.OrdinalIgnoreCase))
+                            {
+                                jObj["sdkVersion"] = targetHex;
+                                modified = true;
+                            }
+                        }
+
+                        if (modified)
+                        {
+                            string bakPath = targetParamJson + ".bak";
+                            if (!File.Exists(bakPath))
+                            {
+                                try { File.Copy(targetParamJson, bakPath, overwrite: false); } catch { }
+                            }
+                            File.WriteAllText(targetParamJson, jObj.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                            SendResponse("buildLog", new { log = $"[Backport] Optimized param.json (requiredSystemSoftwareVersion=0x0100000000000000{(targetSdkVersion.HasValue ? $", sdkVersion=0x{targetSdkVersion.Value:X16}" : "")}).", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    SendResponse("buildLog", new { log = $"[Backport] Warning: param.json patch note: {ex.Message}", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+                }
+            }
+
+            string? bundledFakelibDir = GetBundledFakelibDir();
+
+            // Run recursive make_fself and SDK down-patching
+            // Note: .psp files (e.g. k9.psp) are always staged in background and never exposed to UI.
+            int converted = RecursiveMakeFself(source, msg =>
+            {
+                SendResponse("buildLog", new { log = msg, timestamp = DateTime.Now.ToString("HH:mm:ss") });
+            }, CancellationToken.None, targetSdkVersion, bundledFakelibDir);
+
+            // Scan fakelibs status (returns only non-.psp modules)
+            var fakelibs = LibProsperoPkg.Content.ProsperoFself.GetDetectedFakelibStatus(
+                source,
+                targetSdkVersion ?? 0x0400000000000000uL,
+                bundledFakelibDir);
+
+            int stagedCount = fakelibs.Count(f => f.IsStaged);
+            SendResponse("buildLog", new { log = $"[Backport] Scan complete: {fakelibs.Count} compatibility module(s) parsed ({stagedCount} active). You can configure inclusions in the GUI.", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+
+            SendResponse("backportCompleted", new
+            {
+                success = true,
+                source,
+                targetSdk = targetSdkStr,
+                convertedCount = converted,
+                fakelibs = fakelibs.Select(f => new
+                {
+                    fileName = f.FileName,
+                    moduleName = f.ModuleName,
+                    targetSubDir = f.TargetSubdirectory,
+                    description = f.Description,
+                    size = f.Size,
+                    sizeFormatted = f.SizeFormatted,
+                    isRequired = f.IsRequired,
+                    isStaged = f.IsStaged,
+                    isMissingStub = f.IsMissingStub,
+                    isEbootBypassed = f.IsEbootBypassed,
+                    statusMessage = f.StatusMessage
+                })
+            });
+        }
+        catch (Exception ex)
+        {
+            SendResponse("buildLog", new { log = $"[Backport Error] {ex.Message}", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+            SendResponse("backportError", new { message = ex.Message });
+        }
+    }
+
+    private void HandleResetFakelibs(JsonElement root)
+    {
+        try
+        {
+            string source = root.GetProperty("source").GetString() ?? "";
+            ulong targetSdkVersion = 0;
+            if (root.TryGetProperty("targetSdk", out var sdkProp) && sdkProp.ValueKind == JsonValueKind.String)
+                ulong.TryParse(sdkProp.GetString()?.TrimStart('0', 'x'), System.Globalization.NumberStyles.HexNumber, null, out targetSdkVersion);
+
+            string? bundledFakelibDir = GetBundledFakelibDir();
+            ulong sdk = targetSdkVersion > 0 ? targetSdkVersion : 0x0400000000000000uL;
+            int stagedCount = LibProsperoPkg.Content.ProsperoFself.StageAllMissingStubs(source, bundledFakelibDir, sdk);
+
+            SendResponse("buildLog", new { log = $"[Fakelib] Reset to defaults ({stagedCount} module(s) restored).", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+
+            var fakelibs = LibProsperoPkg.Content.ProsperoFself.GetDetectedFakelibStatus(
+                source,
+                targetSdkVersion > 0 ? targetSdkVersion : 0x0400000000000000uL,
+                bundledFakelibDir);
+
+            SendResponse("fakelibsUpdated", new
+            {
+                success = true,
+                stagedCount,
+                fakelibs = fakelibs.Select(f => new
+                {
+                    fileName = f.FileName,
+                    moduleName = f.ModuleName,
+                    targetSubDir = f.TargetSubdirectory,
+                    description = f.Description,
+                    size = f.Size,
+                    sizeFormatted = f.SizeFormatted,
+                    isRequired = f.IsRequired,
+                    isStaged = f.IsStaged,
+                    isMissingStub = f.IsMissingStub,
+                    isEbootBypassed = f.IsEbootBypassed,
+                    statusMessage = f.StatusMessage
+                })
+            });
+        }
+        catch (Exception ex)
+        {
+            SendResponse("buildLog", new { log = $"[Fakelib Stage Error] {ex.Message}", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+        }
+    }
+
+    private void HandleToggleFakelib(JsonElement root)
+    {
+        try
+        {
+            string source = root.GetProperty("source").GetString() ?? "";
+            string fileName = root.GetProperty("fileName").GetString() ?? "";
+            bool enabled = root.GetProperty("enabled").GetBoolean();
+            ulong targetSdkVersion = 0;
+            if (root.TryGetProperty("targetSdk", out var sdkProp) && sdkProp.ValueKind == JsonValueKind.String)
+                ulong.TryParse(sdkProp.GetString()?.TrimStart('0', 'x'), System.Globalization.NumberStyles.HexNumber, null, out targetSdkVersion);
+            bool syncEboot = false;
+            if (root.TryGetProperty("syncEboot", out var seProp) && (seProp.ValueKind == JsonValueKind.True || seProp.ValueKind == JsonValueKind.False))
+                syncEboot = seProp.GetBoolean();
+
+            if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(fileName)) return;
+            if (fileName.EndsWith(".psp", StringComparison.OrdinalIgnoreCase)) return; // Strictly background
+
+            string? bundledFakelibDir = GetBundledFakelibDir();
+            bool ok = LibProsperoPkg.Content.ProsperoFself.SyncFakelibLive(source, fileName, enabled, bundledFakelibDir, targetSdkVersion, syncEboot);
+            string subDir = LibProsperoPkg.Content.ProsperoFself.GetModuleTargetSubdirectory(fileName);
+
+            string actionText = enabled ? "Staged" : "Removed";
+            string ebootNote = syncEboot ? " (eboot.bin synced)" : "";
+            SendResponse("buildLog", new { log = $"[Fakelib Live] {actionText} '{fileName}' in {subDir}/{ebootNote}", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+
+            var fakelibs = LibProsperoPkg.Content.ProsperoFself.GetDetectedFakelibStatus(
+                source,
+                targetSdkVersion > 0 ? targetSdkVersion : 0x0400000000000000uL,
+                bundledFakelibDir);
+
+            SendResponse("fakelibToggled", new
+            {
+                fileName,
+                enabled,
+                success = ok,
+                staged = enabled && ok,
+                ebootSynced = syncEboot,
+                fakelibs = fakelibs.Select(f => new
+                {
+                    fileName = f.FileName,
+                    moduleName = f.ModuleName,
+                    targetSubDir = f.TargetSubdirectory,
+                    description = f.Description,
+                    size = f.Size,
+                    sizeFormatted = f.SizeFormatted,
+                    isRequired = f.IsRequired,
+                    isStaged = f.IsStaged,
+                    isMissingStub = f.IsMissingStub,
+                    isEbootBypassed = f.IsEbootBypassed,
+                    statusMessage = f.StatusMessage
+                })
+            });
+        }
+        catch (Exception ex)
+        {
+            SendResponse("buildLog", new { log = $"[Fakelib Error] {ex.Message}", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+        }
+    }
+
+    private void HandleSyncEbootPatch(JsonElement root)
+    {
+        try
+        {
+            string source = root.GetProperty("source").GetString() ?? "";
+            ulong targetSdkVersion = 0;
+            if (root.TryGetProperty("targetSdk", out var sdkProp) && sdkProp.ValueKind == JsonValueKind.String)
+                ulong.TryParse(sdkProp.GetString()?.TrimStart('0', 'x'), System.Globalization.NumberStyles.HexNumber, null, out targetSdkVersion);
+
+            var enabledSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (root.TryGetProperty("enabledFiles", out var efArray) && efArray.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in efArray.EnumerateArray())
+                {
+                    string? s = item.GetString();
+                    if (!string.IsNullOrEmpty(s) && !s.EndsWith(".psp", StringComparison.OrdinalIgnoreCase))
+                    {
+                        enabledSet.Add(s);
+                    }
+                }
+            }
+
+            string? bundledFakelibDir = GetBundledFakelibDir();
+            var syncResult = LibProsperoPkg.Content.ProsperoFself.SyncEbootWithFakelibs(
+                source,
+                enabledSet,
+                targetSdkVersion,
+                bundledFakelibDir,
+                msg => SendResponse("buildLog", new { log = msg, timestamp = DateTime.Now.ToString("HH:mm:ss") })
+            );
+
+            // Re-scan updated status after sync
+            var fakelibs = LibProsperoPkg.Content.ProsperoFself.GetDetectedFakelibStatus(
+                source,
+                targetSdkVersion > 0 ? targetSdkVersion : 0x0400000000000000uL,
+                bundledFakelibDir);
+
+            SendResponse("ebootPatchSynced", new
+            {
+                success = syncResult.Success,
+                message = syncResult.Message,
+                patchedCount = syncResult.PatchedCount,
+                restoredCount = syncResult.RestoredCount,
+                fakelibs = fakelibs.Select(f => new
+                {
+                    fileName = f.FileName,
+                    moduleName = f.ModuleName,
+                    targetSubDir = f.TargetSubdirectory,
+                    description = f.Description,
+                    size = f.Size,
+                    sizeFormatted = f.SizeFormatted,
+                    isRequired = f.IsRequired,
+                    isStaged = f.IsStaged,
+                    isMissingStub = f.IsMissingStub,
+                    isEbootBypassed = f.IsEbootBypassed,
+                    statusMessage = f.StatusMessage
+                })
+            });
+        }
+        catch (Exception ex)
+        {
+            SendResponse("buildLog", new { log = $"[Eboot Sync Error] {ex.Message}", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+            SendResponse("ebootPatchSynced", new { success = false, message = ex.Message });
+        }
+    }
+
+    private void HandleSyncFakelibs(JsonElement root)
+    {
+        try
+        {
+            string source = root.GetProperty("source").GetString() ?? "";
+            var enabledSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (root.TryGetProperty("enabledFiles", out var efArray) && efArray.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in efArray.EnumerateArray())
+                {
+                    string? s = item.GetString();
+                    if (!string.IsNullOrEmpty(s) && !s.EndsWith(".psp", StringComparison.OrdinalIgnoreCase))
+                    {
+                        enabledSet.Add(s);
+                    }
+                }
+            }
+
+            string? bundledFakelibDir = GetBundledFakelibDir();
+            foreach (var rule in LibProsperoPkg.Content.ProsperoFself.KnownCompatibilityModules)
+            {
+                if (rule.FileName.EndsWith(".psp", StringComparison.OrdinalIgnoreCase)) continue;
+                bool shouldEnable = enabledSet.Contains(rule.FileName);
+                LibProsperoPkg.Content.ProsperoFself.SyncFakelibLive(source, rule.FileName, shouldEnable, bundledFakelibDir);
+            }
+
+            ulong targetSdkVersion = 0;
+            if (root.TryGetProperty("targetSdk", out var sdkProp) && sdkProp.ValueKind == JsonValueKind.String)
+                ulong.TryParse(sdkProp.GetString()?.TrimStart('0', 'x'), System.Globalization.NumberStyles.HexNumber, null, out targetSdkVersion);
+
+            var fakelibs = LibProsperoPkg.Content.ProsperoFself.GetDetectedFakelibStatus(
+                source,
+                targetSdkVersion > 0 ? targetSdkVersion : 0x0400000000000000uL,
+                bundledFakelibDir);
+
+            SendResponse("buildLog", new { log = $"[Fakelib Live] Synchronized {enabledSet.Count} active compatibility module(s) in source folder.", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+            SendResponse("fakelibsSynced", new
+            {
+                success = true,
+                enabledCount = enabledSet.Count,
+                fakelibs = fakelibs.Select(f => new
+                {
+                    fileName = f.FileName,
+                    moduleName = f.ModuleName,
+                    targetSubDir = f.TargetSubdirectory,
+                    description = f.Description,
+                    size = f.Size,
+                    sizeFormatted = f.SizeFormatted,
+                    isRequired = f.IsRequired,
+                    isStaged = f.IsStaged,
+                    isMissingStub = f.IsMissingStub,
+                    isEbootBypassed = f.IsEbootBypassed,
+                    statusMessage = f.StatusMessage
+                })
+            });
+        }
+        catch (Exception ex)
+        {
+            SendResponse("buildLog", new { log = $"[Fakelib Sync Error] {ex.Message}", timestamp = DateTime.Now.ToString("HH:mm:ss") });
+        }
+    }
+
+    private static string? GetBundledFakelibDir()
+    {
+        string appBaseDir = AppContext.BaseDirectory;
+        string[] candidates =
+        {
+            Path.Combine(appBaseDir, "..", "Resources", "fakelib"),
+            Path.Combine(appBaseDir, "Resources", "fakelib"),
+            Path.Combine(Directory.GetCurrentDirectory(), "gui", "Resources", "fakelib")
+        };
+        return candidates.FirstOrDefault(Directory.Exists);
+    }
 
 
     public static int SanitizeTruncatedElfHeaders(string sourceDir, Action<string>? logger = null, CancellationToken cancellationToken = default)
@@ -1570,6 +1968,11 @@ public sealed class AppLogic
             foreach (var file in files)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                string fname = Path.GetFileName(file);
+                if (fname.StartsWith("._", StringComparison.Ordinal) || fname.Equals(".DS_Store", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
                 try
                 {
                     var fi = new FileInfo(file);
@@ -1656,6 +2059,16 @@ public sealed class AppLogic
                     {
                         try
                         {
+                            string fname = Path.GetFileName(file);
+                            if (fname.StartsWith("._", StringComparison.Ordinal) ||
+                                fname.Equals(".DS_Store", StringComparison.OrdinalIgnoreCase) ||
+                                file.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
+                                file.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase) ||
+                                file.EndsWith(".gp4", StringComparison.OrdinalIgnoreCase) ||
+                                file.EndsWith(".gp5", StringComparison.OrdinalIgnoreCase))
+                            {
+                                continue;
+                            }
                             var fi = new FileInfo(file);
                             totalSize += fi.Length;
                         }
@@ -1667,6 +2080,13 @@ public sealed class AppLogic
                         try
                         {
                             var di = new DirectoryInfo(subDir);
+                            if (di.Name.Equals("__MACOSX", StringComparison.OrdinalIgnoreCase) ||
+                                di.Name.Equals(".Trashes", StringComparison.OrdinalIgnoreCase) ||
+                                di.Name.Equals(".Spotlight-V100", StringComparison.OrdinalIgnoreCase) ||
+                                di.Name.Equals(".fseventsd", StringComparison.OrdinalIgnoreCase))
+                            {
+                                continue;
+                            }
                             if (!di.Attributes.HasFlag(FileAttributes.ReparsePoint))
                             {
                                 dirQueue.Enqueue(subDir);
@@ -1814,6 +2234,35 @@ public sealed class AppLogic
         }
 
         return true;
+    }
+
+    private static void PlayCompletionSound()
+    {
+        try
+        {
+            string baseDir = AppContext.BaseDirectory;
+            string[] candidates =
+            [
+                Path.Combine(baseDir, "wwwroot", "sounds", "success.wav"),
+                Path.Combine(baseDir, "Resources", "sounds", "success.wav"),
+                Path.Combine(baseDir, "..", "Resources", "sounds", "success.wav"),
+                Path.Combine(Directory.GetCurrentDirectory(), "gui", "wwwroot", "sounds", "success.wav"),
+                Path.Combine(Directory.GetCurrentDirectory(), "gui", "Resources", "sounds", "success.wav")
+            ];
+
+            string? soundPath = candidates.FirstOrDefault(File.Exists);
+            if (soundPath != null && OperatingSystem.IsMacOS())
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "afplay",
+                    Arguments = $"\"{soundPath}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+            }
+        }
+        catch { }
     }
 }
 

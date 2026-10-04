@@ -85,7 +85,7 @@ public static class ProsperoSiArchive
 		return WriteZip(BuildMembers(pfsImageXml.ContentId, pfsImageXml2, playGoChunkDat, napsMeta18, napsMeta19, null, mountImage));
 	}
 
-	public static byte[] BuildDebugSiSegment(ProsperoPfsImageXmlOptions pfsImageXml, byte[]? playGoChunkDat, Stream mountImage, long innerImageSize = 0L, ICollection<string>? warnings = null, byte[]? napsMeta18 = null, bool includePfsImageXml = true, IReadOnlyList<(string Path, long Size)>? contentFiles = null, ProsperoPs5InnerImageResult? innerImage = null, IProsperoNapsIntegrityProvider? integrityProvider = null, byte[]? pfsImageKey = null, byte[]? pfsImageSeed = null, Action<string>? log = null, int maxHashingThreads = 2)
+	public static byte[] BuildDebugSiSegment(ProsperoPfsImageXmlOptions pfsImageXml, byte[]? playGoChunkDat, Stream mountImage, long innerImageSize = 0L, ICollection<string>? warnings = null, byte[]? napsMeta18 = null, bool includePfsImageXml = true, IReadOnlyList<(string Path, long Size)>? contentFiles = null, ProsperoPs5InnerImageResult? innerImage = null, IProsperoNapsIntegrityProvider? integrityProvider = null, byte[]? pfsImageKey = null, byte[]? pfsImageSeed = null, Action<string>? log = null, int maxHashingThreads = 2, byte[]? outerImageDigests = null)
 	{
 		ArgumentNullException.ThrowIfNull(pfsImageXml, "pfsImageXml");
 		ArgumentNullException.ThrowIfNull(mountImage, "mountImage");
@@ -112,7 +112,7 @@ public static class ProsperoSiArchive
 		byte[] napsMeta19 = ((num >= 131072) ? ProsperoNapsMeta.BuildMeta300FromInnerImageSize(num) : null);
 		if (napsMeta18 == null && num >= 131072 && innerImage != null)
 		{
-			byte[] array = ProsperoNapsMeta.BuildMeta18(num, mountImage.Length, contentFiles ?? Array.Empty<(string, long)>(), innerImage, integrityProvider, pfsImageKey, pfsImageSeed, log, maxHashingThreads);
+			byte[] array = ProsperoNapsMeta.BuildMeta18(num, mountImage.Length, contentFiles ?? Array.Empty<(string, long)>(), innerImage, integrityProvider, pfsImageKey, pfsImageSeed, log, maxHashingThreads, mountImageStream: mountImage, outerImageDigests: outerImageDigests);
 			if (array.Length != 0)
 			{
 				napsMeta18 = array;

@@ -90,6 +90,46 @@ public sealed class ProsperoPs5InnerImageAssembler
 
 	private sealed record RenderedFsTree(IReadOnlyList<ProsperoPs5InnerFile> Files, IReadOnlyList<ProsperoPs5InnerDirectory> Directories);
 
+	private sealed class BatchSlot
+	{
+		public readonly byte[][] Buffers;
+		public readonly int[] Lengths;
+		public readonly byte[][] Sha3;
+		public readonly ulong[] Ihsh;
+		public readonly ulong[] Rhsh;
+		public readonly EncodedBlock?[] Enc;
+		public int Count;
+
+		public BatchSlot(int capacity)
+		{
+			Buffers = new byte[capacity][];
+			for (int b = 0; b < capacity; b++)
+			{
+				Buffers[b] = new byte[262144];
+			}
+			Lengths = new int[capacity];
+			Sha3 = new byte[capacity][];
+			Ihsh = new ulong[capacity];
+			Rhsh = new ulong[capacity];
+			Enc = new EncodedBlock?[capacity];
+		}
+
+		public int ReadFrom(Stream stream, ref long remaining)
+		{
+			int batchCount = 0;
+			while (batchCount < Buffers.Length && remaining > 0)
+			{
+				int toRead = (int)Math.Min(262144L, remaining);
+				stream.ReadExactly(Buffers[batchCount], 0, toRead);
+				Lengths[batchCount] = toRead;
+				remaining -= toRead;
+				batchCount++;
+			}
+			Count = batchCount;
+			return batchCount;
+		}
+	}
+
 	/// <summary>Inner-image block size (64 KiB).</summary>
 	public const int BlockSize = 65536;
 
@@ -216,14 +256,19 @@ public sealed class ProsperoPs5InnerImageAssembler
 		string ext = Path.GetExtension(fullPath).ToLowerInvariant();
 		return ext switch
 		{
-			".png" or ".jpg" or ".jpeg" or ".dds" or ".at9" or ".bik" or ".bk2" or ".mp4" or ".webm" or ".cas" => true,
-			_ => Path.GetFileName(fullPath).StartsWith("._", StringComparison.Ordinal)
+			".png" or ".jpg" or ".jpeg" or ".at9" or ".bik" or ".bk2" or ".mp4" or ".webm" or ".mkv" or ".avi" or
+			".wem" or ".bnk" or ".fsb" or ".mp3" or ".ogg" or ".opus" or ".aac" or ".m4a" or
+			".zip" or ".7z" or ".gz" or ".zst" or ".tar" => true,
+			_ => false
 		};
 	}
 
 	private static bool IsExcludedFromInner(string fullPath)
 	{
-		if (fullPath.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
+		string fileName = Path.GetFileName(fullPath);
+		if (fileName.StartsWith("._", StringComparison.Ordinal) ||
+		    fileName.Equals(".DS_Store", StringComparison.OrdinalIgnoreCase) ||
+		    fullPath.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
 		    fullPath.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase))
 		{
 			return true;
@@ -447,10 +492,9 @@ public sealed class ProsperoPs5InnerImageAssembler
 					}
 					fileNode.OnDiskOffset = startOffset;
 
-					bool isRaw = !_compress || fileNode.WholeBlockRaw || IsIncompressible(fileNode.FullPath);
-
-					if (isRaw)
+					void WriteRawFile()
 					{
+						blockIntegrities.Clear();
 						fileNode.StoreRaw = true;
 						fileNode.CompressionBlocks = Array.Empty<ProsperoInnerDataBlockChunk>();
 						if (fileStream != null)
@@ -463,34 +507,59 @@ public sealed class ProsperoPs5InnerImageAssembler
 							MemoryStream? memDest = (fileStream == null) ? new MemoryStream() : null;
 							int chunkCount = 0;
 							int lastReportedFilePct = -1;
-							while (remaining > 0)
+							int batchCapacity = Math.Max(1, Math.Min(64, _maxHashingThreads > 0 ? _maxHashingThreads * 4 : 16));
+
+							BatchSlot currentSlot = new BatchSlot(batchCapacity);
+							BatchSlot nextSlot = new BatchSlot(batchCapacity);
+
+							ParallelOptions pOpts = new ParallelOptions
+							{
+								MaxDegreeOfParallelism = Math.Max(1, _maxHashingThreads),
+								CancellationToken = _cancellationToken
+							};
+
+							currentSlot.ReadFrom(stream, ref remaining);
+
+							while (currentSlot.Count > 0)
 							{
 								_cancellationToken.ThrowIfCancellationRequested();
-								int toRead = (int)Math.Min(262144L, remaining);
-								stream.ReadExactly(chunkBuffer, 0, toRead);
-								ReadOnlySpan<byte> chunkSpan = chunkBuffer.AsSpan(0, toRead);
 
-								byte[] sha3 = ProsperoImageDigests.Sha3_256(chunkSpan);
-								ulong ihsh = ProsperoNapsMeta.ComputeInputChecksum(chunkSpan);
-								ulong rhsh = ProsperoNapsMeta.ComputeRollingHash(chunkSpan);
-								blockIntegrities.Add(new ProsperoInnerBlockIntegrity(sha3, ihsh, rhsh));
+								Task<int>? prefetchTask = null;
+								if (remaining > 0)
+								{
+									prefetchTask = Task.Run(() => nextSlot.ReadFrom(stream, ref remaining));
+								}
 
-								if (fileStream != null)
+								Parallel.For(0, currentSlot.Count, pOpts, i =>
 								{
-									fileStream.Write(chunkSpan);
-								}
-								else
+									int len = currentSlot.Lengths[i];
+									ReadOnlySpan<byte> chunkSpan = currentSlot.Buffers[i].AsSpan(0, len);
+									currentSlot.Sha3[i] = ProsperoImageDigests.Sha3_256(chunkSpan);
+									currentSlot.Ihsh[i] = ProsperoNapsMeta.ComputeInputChecksum(chunkSpan);
+									currentSlot.Rhsh[i] = ProsperoNapsMeta.ComputeRollingHash(chunkSpan);
+								});
+
+								for (int i = 0; i < currentSlot.Count; i++)
 								{
-									memDest!.Write(chunkSpan);
+									int len = currentSlot.Lengths[i];
+									blockIntegrities.Add(new ProsperoInnerBlockIntegrity(currentSlot.Sha3[i], currentSlot.Ihsh[i], currentSlot.Rhsh[i]));
+									ReadOnlySpan<byte> chunkSpan = currentSlot.Buffers[i].AsSpan(0, len);
+									if (fileStream != null)
+									{
+										fileStream.Write(chunkSpan);
+									}
+									else
+									{
+										memDest!.Write(chunkSpan);
+									}
+									chunkCount++;
 								}
-								remaining -= toRead;
-								chunkCount++;
 
 								if (fileNode.Size >= 67108864)
 								{
 									long processed = fileNode.Size - remaining;
 									int filePct = (int)(processed * 100 / fileNode.Size);
-									if (filePct >= lastReportedFilePct + 2 || remaining == 0)
+									if (filePct >= lastReportedFilePct + 2 || (remaining == 0 && (prefetchTask == null || nextSlot.Count == 0)))
 									{
 										lastReportedFilePct = filePct;
 										long totalProcessed = num12 + processed;
@@ -498,7 +567,21 @@ public sealed class ProsperoPs5InnerImageAssembler
 										_log($"  data {overallPct,3}%: {fileNode.FullPath} ({filePct}% - {processed:N0}/{fileNode.Size:N0} bytes)");
 									}
 								}
+
+								if (prefetchTask != null)
+								{
+									prefetchTask.GetAwaiter().GetResult();
+								}
+								else
+								{
+									nextSlot.Count = 0;
+								}
+
+								var temp = currentSlot;
+								currentSlot = nextSlot;
+								nextSlot = temp;
 							}
+
 							if (fileStream == null)
 							{
 								fileNode.OnDiskData = memDest!.ToArray();
@@ -511,7 +594,8 @@ public sealed class ProsperoPs5InnerImageAssembler
 						}
 						fileNode.OnDiskSize = fileNode.Size;
 					}
-					else
+
+					void WriteCompressedFile()
 					{
 						if (fileStream != null)
 						{
@@ -519,58 +603,51 @@ public sealed class ProsperoPs5InnerImageAssembler
 						}
 						MemoryStream? compMemDest = (fileStream == null) ? new MemoryStream() : null;
 						long totalCompressedSize = 0L;
+						bool abortedEarlyAsRaw = false;
 
 						using (Stream stream = fileNode.OpenStream!())
 						{
 							long remaining = fileNode.Size;
 							int compChunkCount = 0;
 							int lastReportedFilePct = -1;
-							int batchCapacity = Math.Max(1, Math.Min(32, _maxHashingThreads > 0 ? _maxHashingThreads * 4 : 16));
-							byte[][] batchBuffers = new byte[batchCapacity][];
-							for (int b = 0; b < batchCapacity; b++)
-							{
-								batchBuffers[b] = new byte[262144];
-							}
-							int[] batchLengths = new int[batchCapacity];
-							byte[][] batchSha3 = new byte[batchCapacity][];
-							ulong[] batchIhsh = new ulong[batchCapacity];
-							ulong[] batchRhsh = new ulong[batchCapacity];
-							EncodedBlock?[] batchEnc = new EncodedBlock?[batchCapacity];
+							int batchCapacity = Math.Max(1, Math.Min(64, _maxHashingThreads > 0 ? _maxHashingThreads * 4 : 16));
 
-							while (remaining > 0)
+							BatchSlot currentSlot = new BatchSlot(batchCapacity);
+							BatchSlot nextSlot = new BatchSlot(batchCapacity);
+
+							ParallelOptions pOpts = new ParallelOptions
+							{
+								MaxDegreeOfParallelism = Math.Max(1, _maxHashingThreads),
+								CancellationToken = _cancellationToken
+							};
+
+							currentSlot.ReadFrom(stream, ref remaining);
+
+							while (currentSlot.Count > 0)
 							{
 								_cancellationToken.ThrowIfCancellationRequested();
-								int batchCount = 0;
-								while (batchCount < batchCapacity && remaining > 0)
+
+								Task<int>? prefetchTask = null;
+								if (remaining > 0)
 								{
-									int toRead = (int)Math.Min(262144L, remaining);
-									stream.ReadExactly(batchBuffers[batchCount], 0, toRead);
-									batchLengths[batchCount] = toRead;
-									remaining -= toRead;
-									batchCount++;
+									prefetchTask = Task.Run(() => nextSlot.ReadFrom(stream, ref remaining));
 								}
 
-								ParallelOptions pOpts = new ParallelOptions
+								Parallel.For(0, currentSlot.Count, pOpts, i =>
 								{
-									MaxDegreeOfParallelism = Math.Max(1, _maxHashingThreads),
-									CancellationToken = _cancellationToken
-								};
-
-								Parallel.For(0, batchCount, pOpts, i =>
-								{
-									int len = batchLengths[i];
-									ReadOnlySpan<byte> chunkSpan = batchBuffers[i].AsSpan(0, len);
-									batchSha3[i] = ProsperoImageDigests.Sha3_256(chunkSpan);
-									batchIhsh[i] = ProsperoNapsMeta.ComputeInputChecksum(chunkSpan);
-									batchRhsh[i] = ProsperoNapsMeta.ComputeRollingHash(chunkSpan);
-									batchEnc[i] = (len < 64) ? null : OodleKrakenEncoder.EncodeBlock(chunkSpan, useHuffmanArrays: true);
+									int len = currentSlot.Lengths[i];
+									ReadOnlySpan<byte> chunkSpan = currentSlot.Buffers[i].AsSpan(0, len);
+									currentSlot.Sha3[i] = ProsperoImageDigests.Sha3_256(chunkSpan);
+									currentSlot.Ihsh[i] = ProsperoNapsMeta.ComputeInputChecksum(chunkSpan);
+									currentSlot.Rhsh[i] = ProsperoNapsMeta.ComputeRollingHash(chunkSpan);
+									currentSlot.Enc[i] = (len < 64) ? null : OodleKrakenEncoder.EncodeBlock(chunkSpan, useHuffmanArrays: true);
 								});
 
-								for (int i = 0; i < batchCount; i++)
+								for (int i = 0; i < currentSlot.Count; i++)
 								{
-									int len = batchLengths[i];
-									blockIntegrities.Add(new ProsperoInnerBlockIntegrity(batchSha3[i], batchIhsh[i], batchRhsh[i]));
-									EncodedBlock? enc = batchEnc[i];
+									int len = currentSlot.Lengths[i];
+									blockIntegrities.Add(new ProsperoInnerBlockIntegrity(currentSlot.Sha3[i], currentSlot.Ihsh[i], currentSlot.Rhsh[i]));
+									EncodedBlock? enc = currentSlot.Enc[i];
 
 									if (enc.HasValue && enc.Value.Payload.Length < len)
 									{
@@ -590,7 +667,7 @@ public sealed class ProsperoPs5InnerImageAssembler
 									}
 									else
 									{
-										ReadOnlySpan<byte> rawSpan = batchBuffers[i].AsSpan(0, len);
+										ReadOnlySpan<byte> rawSpan = currentSlot.Buffers[i].AsSpan(0, len);
 										if (fileStream != null)
 										{
 											fileStream.Write(rawSpan);
@@ -606,11 +683,20 @@ public sealed class ProsperoPs5InnerImageAssembler
 									compChunkCount++;
 								}
 
+								long processed = fileNode.Size - remaining;
 								if (fileNode.Size >= 67108864)
 								{
-									long processed = fileNode.Size - remaining;
+									// Early abort sampling: if after 32 MB sample the file saves < 6.25%, abort early and stream raw!
+									if (processed >= 33554432 && totalCompressedSize > processed * 15L / 16L)
+									{
+										_log($"  file {fileNode.FullPath} is poorly compressible ({totalCompressedSize * 100 / processed}% on 32MB sample), fast-switching to raw copy...");
+										abortedEarlyAsRaw = true;
+										prefetchTask?.GetAwaiter().GetResult();
+										break;
+									}
+
 									int filePct = (int)(processed * 100 / fileNode.Size);
-									if (filePct >= lastReportedFilePct + 2 || remaining == 0)
+									if (filePct >= lastReportedFilePct + 2 || (remaining == 0 && (prefetchTask == null || nextSlot.Count == 0)))
 									{
 										lastReportedFilePct = filePct;
 										long totalProcessed = num12 + processed;
@@ -618,41 +704,56 @@ public sealed class ProsperoPs5InnerImageAssembler
 										_log($"  data {overallPct,3}%: {fileNode.FullPath} ({filePct}% - {processed:N0}/{fileNode.Size:N0} bytes)");
 									}
 								}
+
+								if (prefetchTask != null)
+								{
+									prefetchTask.GetAwaiter().GetResult();
+								}
+								else
+								{
+									nextSlot.Count = 0;
+								}
+
+								var temp = currentSlot;
+								currentSlot = nextSlot;
+								nextSlot = temp;
 							}
 						}
 
-						bool keepCompressed = totalCompressedSize <= (long)fileNode.Size * 15L / 16L;
-						if (keepCompressed)
+						if (abortedEarlyAsRaw)
 						{
-							fileNode.StoreRaw = false;
-							fileNode.CompressionBlocks = compressionBlocks;
-							fileNode.OnDiskSize = totalCompressedSize;
-							num11 = startOffset + totalCompressedSize;
-							if (fileStream == null)
-							{
-								fileNode.OnDiskData = compMemDest!.ToArray();
-							}
+							WriteRawFile();
 						}
 						else
 						{
-							fileNode.StoreRaw = true;
-							fileNode.CompressionBlocks = Array.Empty<ProsperoInnerDataBlockChunk>();
-							fileNode.OnDiskSize = fileNode.Size;
-							if (fileStream != null)
+							bool keepCompressed = totalCompressedSize <= (long)fileNode.Size * 15L / 16L;
+							if (keepCompressed)
 							{
-								fileStream.Position = startOffset;
-								using Stream stream = fileNode.OpenStream!();
-								stream.CopyTo(fileStream, 1048576);
+								fileNode.StoreRaw = false;
+								fileNode.CompressionBlocks = compressionBlocks;
+								fileNode.OnDiskSize = totalCompressedSize;
+								num11 = startOffset + totalCompressedSize;
+								if (fileStream == null)
+								{
+									fileNode.OnDiskData = compMemDest!.ToArray();
+								}
 							}
 							else
 							{
-								using MemoryStream mem = new MemoryStream();
-								using Stream stream = fileNode.OpenStream!();
-								stream.CopyTo(mem, 1048576);
-								fileNode.OnDiskData = mem.ToArray();
+								WriteRawFile();
 							}
-							num11 = startOffset + fileNode.Size;
 						}
+					}
+
+					bool isRaw = !_compress || fileNode.WholeBlockRaw || IsIncompressible(fileNode.FullPath);
+
+					if (isRaw)
+					{
+						WriteRawFile();
+					}
+					else
+					{
+						WriteCompressedFile();
 					}
 
 					fileNode.BlockIntegrities = blockIntegrities;

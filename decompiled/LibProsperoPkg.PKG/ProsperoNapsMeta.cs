@@ -78,14 +78,14 @@ public static class ProsperoNapsMeta
 		return BuildMeta18Core(innerImageSize, mountImage.LongLength, mountImage, contentFiles, inner, integrityProvider, pfsImageKey, pfsImageSeed);
 	}
 
-	public static byte[] BuildMeta18(ulong innerImageSize, long mountImageSize, IReadOnlyList<(string Path, long Size)> contentFiles, ProsperoPs5InnerImageResult inner, IProsperoNapsIntegrityProvider? integrityProvider = null, byte[]? pfsImageKey = null, byte[]? pfsImageSeed = null, Action<string>? log = null, int maxHashingThreads = 2)
+	public static byte[] BuildMeta18(ulong innerImageSize, long mountImageSize, IReadOnlyList<(string Path, long Size)> contentFiles, ProsperoPs5InnerImageResult inner, IProsperoNapsIntegrityProvider? integrityProvider = null, byte[]? pfsImageKey = null, byte[]? pfsImageSeed = null, Action<string>? log = null, int maxHashingThreads = 2, Stream? mountImageStream = null, byte[]? outerImageDigests = null)
 	{
 		ArgumentNullException.ThrowIfNull(contentFiles, "contentFiles");
 		ArgumentNullException.ThrowIfNull(inner, "inner");
-		return BuildMeta18Core(innerImageSize, mountImageSize, Array.Empty<byte>(), contentFiles, inner, integrityProvider, pfsImageKey, pfsImageSeed, log, maxHashingThreads);
+		return BuildMeta18Core(innerImageSize, mountImageSize, Array.Empty<byte>(), contentFiles, inner, integrityProvider, pfsImageKey, pfsImageSeed, log, maxHashingThreads, mountImageStream, outerImageDigests);
 	}
 
-	private static byte[] BuildMeta18Core(ulong innerImageSize, long mountImageSize, byte[] mountImage, IReadOnlyList<(string Path, long Size)> contentFiles, ProsperoPs5InnerImageResult? inner, IProsperoNapsIntegrityProvider? integrityProvider, byte[]? pfsImageKey, byte[]? pfsImageSeed, Action<string>? log = null, int maxHashingThreads = 2)
+	private static byte[] BuildMeta18Core(ulong innerImageSize, long mountImageSize, byte[] mountImage, IReadOnlyList<(string Path, long Size)> contentFiles, ProsperoPs5InnerImageResult? inner, IProsperoNapsIntegrityProvider? integrityProvider, byte[]? pfsImageKey, byte[]? pfsImageSeed, Action<string>? log = null, int maxHashingThreads = 2, Stream? mountImageStream = null, byte[]? outerImageDigests = null)
 	{
 		if (innerImageSize < 65536 || mountImageSize < 65536)
 		{
@@ -298,55 +298,90 @@ public static class ProsperoNapsMeta
 			WriteRecord(list2, "twek", 1, span7);
 			array18 = new byte[(int)num * 32];
 		}
-		using (Stream stream = inner?.OpenImage())
+		if (outerImageDigests != null && outerImageDigests.Length >= (int)num * 32)
 		{
-			byte[] chunkBuffer = new byte[8388608];
-			int num17 = (int)num;
-			int num18 = 0;
-			int num19 = -1;
-			for (int blockOffset = 0; blockOffset < num17; blockOffset += 128)
+			Buffer.BlockCopy(outerImageDigests, 0, array18, 0, (int)num * 32);
+			WriteRecord(list2, "obdg", 1, array18);
+		}
+		else
+		{
+			Stream? sourceStream = null;
+			long streamBaseOffset = 0L;
+			bool disposeStream = false;
+
+			if (mountImageStream != null && mountImageStream.CanRead && mountImageStream.CanSeek && mountImageStream.Length >= 65536L + (long)num * 65536L)
 			{
-				int num20 = Math.Min(128, num17 - blockOffset);
-				long num21 = (long)blockOffset * 65536L;
-				int bytesToRead = 0;
-				if (stream != null && stream.Length > num21)
+				sourceStream = mountImageStream;
+				streamBaseOffset = 65536L;
+			}
+			else
+			{
+				sourceStream = inner?.OpenImage();
+				disposeStream = true;
+			}
+
+			long originalStreamPos = (sourceStream != null && sourceStream.CanSeek) ? sourceStream.Position : 0L;
+			try
+			{
+				byte[] chunkBuffer = new byte[8388608];
+				int num17 = (int)num;
+				int num18 = 0;
+				int num19 = -1;
+				for (int blockOffset = 0; blockOffset < num17; blockOffset += 128)
 				{
-					bytesToRead = (int)Math.Min((long)num20 * 65536L, stream.Length - num21);
-					stream.Position = num21;
-					stream.ReadExactly(chunkBuffer.AsSpan(0, bytesToRead));
-				}
-				Parallel.For(0, num20, new ParallelOptions
-				{
-					MaxDegreeOfParallelism = Math.Max(1, maxHashingThreads)
-				}, (int num25) =>
-				{
-					int num24 = blockOffset + num25;
-					ProsperoImageDigests.Sha3_256((bytesToRead >= (num25 + 1) * 65536) ? ((ReadOnlySpan<byte>)chunkBuffer.AsSpan(num25 * 65536, 65536)) : ReadOnlySpan<byte>.Empty).CopyTo(array18, num24 * 32);
-				});
-				if (maxHashingThreads <= 1)
-				{
-					Thread.Sleep(16);
-				}
-				else if (maxHashingThreads <= 2)
-				{
-					Thread.Sleep(8);
-				}
-				else if (maxHashingThreads <= 4)
-				{
-					Thread.Sleep(3);
-				}
-				num18 += num20;
-				if (num17 > 1000)
-				{
-					int num22 = (int)((long)num18 * 100L / num17);
-					if (num22 >= num19 + 5 || num18 == num17)
+					int num20 = Math.Min(128, num17 - blockOffset);
+					long num21 = streamBaseOffset + (long)blockOffset * 65536L;
+					int bytesToRead = 0;
+					if (sourceStream != null && sourceStream.Length > num21)
 					{
-						num19 = num22;
-						log?.Invoke($"[stage 5/5] Generating NAPS outer block digests: {num22}% ({num18:N0}/{num17:N0} blocks)...");
+						bytesToRead = (int)Math.Min((long)num20 * 65536L, sourceStream.Length - num21);
+						sourceStream.Position = num21;
+						sourceStream.ReadExactly(chunkBuffer.AsSpan(0, bytesToRead));
+					}
+					Parallel.For(0, num20, new ParallelOptions
+					{
+						MaxDegreeOfParallelism = Math.Max(1, maxHashingThreads)
+					}, (int num25) =>
+					{
+						int num24 = blockOffset + num25;
+						ProsperoImageDigests.Sha3_256((bytesToRead >= (num25 + 1) * 65536) ? ((ReadOnlySpan<byte>)chunkBuffer.AsSpan(num25 * 65536, 65536)) : ReadOnlySpan<byte>.Empty).CopyTo(array18, num24 * 32);
+					});
+					if (maxHashingThreads <= 1)
+					{
+						Thread.Sleep(16);
+					}
+					else if (maxHashingThreads <= 2)
+					{
+						Thread.Sleep(8);
+					}
+					else if (maxHashingThreads <= 4)
+					{
+						Thread.Sleep(3);
+					}
+					num18 += num20;
+					if (num17 > 1000)
+					{
+						int num22 = (int)((long)num18 * 100L / num17);
+						if (num22 >= num19 + 5 || num18 == num17)
+						{
+							num19 = num22;
+							log?.Invoke($"[stage 5/5] Generating NAPS outer block digests: {num22}% ({num18:N0}/{num17:N0} blocks)...");
+						}
 					}
 				}
+				WriteRecord(list2, "obdg", 1, array18);
 			}
-			WriteRecord(list2, "obdg", 1, array18);
+			finally
+			{
+				if (disposeStream)
+				{
+					sourceStream?.Dispose();
+				}
+				else if (sourceStream != null && sourceStream.CanSeek)
+				{
+					sourceStream.Position = originalStreamPos;
+				}
+			}
 		}
 		WriteRecord(list2, "obcc", 1, array3);
 		byte[] array19 = BuildMeta300FromInnerImageSize(innerImageSize);

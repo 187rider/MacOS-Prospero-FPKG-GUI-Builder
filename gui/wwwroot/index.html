@@ -1,14 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LibProsperoPKG — PS5 Package Builder</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="app.css">
 </head>
+
 <body>
   <div class="app-container">
     <!-- Top Navigation Bar -->
@@ -23,21 +27,33 @@
         </div>
         <div class="brand-text">
           <span class="brand-title">LibProsperoPKG</span>
-          <span class="brand-subtitle">PS5 Package Studio • macOS <span class="brand-version">v1.6.0</span></span>
+          <span class="brand-subtitle">PS5 Package Studio • macOS <span class="brand-version">v2.0.0</span></span>
         </div>
       </div>
 
       <nav class="nav-tabs" role="tablist">
         <button class="nav-tab active" data-tab="build" id="tab-btn-build">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <path
+              d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+            </path>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+          </svg>
           Build Package
         </button>
         <button class="nav-tab" data-tab="unpack-verify" id="tab-btn-unpack-verify">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            <polyline points="9 12 11 14 15 10"></polyline>
+          </svg>
           Unpack & Verify
         </button>
         <button class="nav-tab" data-tab="inspect" id="tab-btn-inspect">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
           Inspect PKG
         </button>
       </nav>
@@ -76,7 +92,8 @@
             <div class="form-group">
               <label for="input-source">Source Directory (Project Folder)</label>
               <div class="input-with-button">
-                <input type="text" id="input-source" placeholder="/path/to/my_ps5_game_or_app (or drop folder here)" spellcheck="false" autocomplete="off">
+                <input type="text" id="input-source" placeholder="/path/to/my_ps5_game_or_app (or drop folder here)"
+                  spellcheck="false" autocomplete="off">
                 <button type="button" class="btn btn-secondary" id="btn-browse-source">Browse...</button>
               </div>
               <div class="metadata-banner" id="metadata-banner" style="display: none;">
@@ -93,8 +110,21 @@
             <div class="form-group">
               <label for="input-output">Output Directory</label>
               <div class="input-with-button">
-                <input type="text" id="input-output" placeholder="/path/to/output_folder (or drop folder here)" spellcheck="false" autocomplete="off">
+                <input type="text" id="input-output" placeholder="/path/to/output_folder (or drop folder here)"
+                  spellcheck="false" autocomplete="off">
                 <button type="button" class="btn btn-secondary" id="btn-browse-output">Browse...</button>
+              </div>
+            </div>
+
+            <!-- Custom Scratch / Temp Working Directory Picker -->
+            <div class="form-group">
+              <label for="input-workdir">Custom Temp / Scratch Directory <span class="badge-optional"
+                  style="font-size: 11px; opacity: 0.7;">Optional (Defaults to System Temp)</span></label>
+              <div class="input-with-button">
+                <input type="text" id="input-workdir"
+                  placeholder="Leave empty for system temp or select fast NVMe/SSD scratch drive" spellcheck="false"
+                  autocomplete="off">
+                <button type="button" class="btn btn-secondary" id="btn-browse-workdir">Browse...</button>
               </div>
             </div>
 
@@ -102,7 +132,8 @@
             <div class="form-row">
               <div class="form-group">
                 <label for="input-content-id">Content ID</label>
-                <input type="text" id="input-content-id" placeholder="UP0000-PPSA00000_00-0000000000000000" maxlength="36" spellcheck="false">
+                <input type="text" id="input-content-id" placeholder="UP0000-PPSA00000_00-0000000000000000"
+                  maxlength="36" spellcheck="false">
               </div>
               <div class="form-group">
                 <label for="input-version">Version</label>
@@ -129,7 +160,8 @@
               <div class="form-group flex-1">
                 <label for="select-image-mode">Outer Image Mode</label>
                 <select id="select-image-mode">
-                  <option value="plaintext" selected>Plaintext / No-Auth (PPRPLAIN-NOAUTH - Recommended for PS5 kstuff/FPKG)</option>
+                  <option value="plaintext" selected>Plaintext / No-Auth (PPRPLAIN-NOAUTH - Recommended for PS5
+                    kstuff/FPKG)</option>
                   <option value="native">Native (AES-XTS Encrypted)</option>
                 </select>
               </div>
@@ -138,7 +170,7 @@
                 <select id="select-compression">
                   <option value="none" selected>None (Raw PFSC)</option>
                   <option value="kraken">Kraken (PFSv3)</option>
-                  <option value="zlib">Zlib (PFSC)</option>
+                  <option value="zlib" disabled>Zlib (PFSC) [Disabled]</option>
                 </select>
               </div>
               <div class="form-group flex-small">
@@ -146,12 +178,12 @@
                 <input type="number" id="input-chunks" value="1" min="1" max="16">
               </div>
               <div class="form-group flex-1">
-                <label for="select-cpu-mode">CPU & Thermal Profile</label>
+                <label for="select-cpu-mode">CPU Mode</label>
                 <select id="select-cpu-mode">
-                  <option value="cool" selected>❄️ Cool & Quiet (2 Cores, Low Heat)</option>
+                  <option value="cool" selected>Cool & Quiet (Throttled, Low Heat)</option>
                   <option value="single">Single Core (Minimal CPU)</option>
-                  <option value="balanced">Balanced (4 Cores)</option>
-                  <option value="max">⚡ Max Speed (All Cores, High Heat)</option>
+                  <option value="balanced">Balanced (50% Cores)</option>
+                  <option value="max">Max Speed (All Cores, Max Throughput)</option>
                 </select>
               </div>
             </div>
@@ -160,10 +192,12 @@
             <div class="form-row align-center">
               <div class="form-group flex-2">
                 <label for="input-passcode">Passcode (32 characters)</label>
-                <input type="text" id="input-passcode" value="00000000000000000000000000000000" maxlength="32" spellcheck="false">
+                <input type="text" id="input-passcode" value="00000000000000000000000000000000" maxlength="32"
+                  spellcheck="false">
               </div>
               <div class="form-group checkbox-group flex-1">
-                <label class="checkbox-container" title="Recursively fake-sign decrypted ELFs (.bin, .elf, .prx, .sprx) using make_fself in Stage 0">
+                <label class="checkbox-container"
+                  title="Recursively fake-sign decrypted ELFs (.bin, .elf, .prx, .sprx) using make_fself in Stage 0">
                   <input type="checkbox" id="chk-fself" checked>
                   <span class="checkmark"></span>
                   Stage 0: FSELF
@@ -184,7 +218,8 @@
             <!-- Mode Option: Already Patched / Direct Packaging -->
             <div class="form-row align-center already-patched-group-row">
               <div class="form-group flex-1">
-                <label class="checkbox-container already-patched-chk-label" title="Skip all ELF signing, backport patches, and file modifications. Use this if your game files are already patched and you only want to build the FPKG without touching any files.">
+                <label class="checkbox-container already-patched-chk-label"
+                  title="Skip all ELF signing, backport patches, and file modifications. Use this if your game files are already patched and you only want to build the FPKG without touching any files.">
                   <input type="checkbox" id="chk-already-patched">
                   <span class="checkmark"></span>
                   <span class="already-patched-toggle-text">
@@ -198,14 +233,17 @@
             <!-- Backport Configuration (Selectable SDK) -->
             <div class="form-row align-center backport-group-row">
               <div class="form-group flex-1">
-                <label class="checkbox-container backport-chk-label" title="Enable executable SDK and firmware backporting for lower jailbroken PS5 versions">
+                <label class="checkbox-container backport-chk-label"
+                  title="Enable executable SDK and firmware backporting for lower jailbroken PS5 versions">
                   <input type="checkbox" id="chk-backport" checked>
                   <span class="checkmark"></span>
-                  <span class="backport-toggle-text">Backport SDK <span class="badge-experimental">Experimental</span></span>
+                  <span class="backport-toggle-text">Backport SDK <span
+                      class="badge-experimental">Experimental</span></span>
                 </label>
               </div>
               <div class="form-group flex-2" id="backport-sdk-container">
-                <label for="select-backport-sdk">Target SDK Version <span class="badge-experimental">Experimental</span></label>
+                <label for="select-backport-sdk">Target SDK Version <span
+                    class="badge-experimental">Experimental</span></label>
                 <select id="select-backport-sdk">
                   <option value="0x0400000000000000" selected>⚡ SDK 4.00 (FW 4.00 - 4.51) — Experimental</option>
                   <option value="0x0300000000000000">SDK 3.00 (FW 3.00 - 3.21) — Experimental</option>
@@ -216,18 +254,57 @@
               </div>
             </div>
 
-            <!-- Build Action Button -->
+            <!-- Dynamic Compatibility Fakelibs (Parsed Modules Checklist) -->
+            <div id="fakelib-selection-container" class="fakelib-selection-container" style="display: none;">
+              <div class="fakelib-header">
+                <div class="fakelib-header-left">
+                  <span class="fakelib-title">Compatibility Fakelibs</span>
+                  <span class="badge" id="fakelib-count-badge">0 parsed</span>
+                </div>
+                <div class="fakelib-header-actions">
+                  <button type="button" class="btn-text btn-sm" id="btn-fakelib-reset" title="Reset fakelibs to recommended defaults">RST</button>
+                  <span class="fakelib-action-sep">•</span>
+                  <button type="button" class="btn-text btn-sm" id="btn-fakelib-select-all">Select All</button>
+                  <span class="fakelib-action-sep">•</span>
+                  <button type="button" class="btn-text btn-sm" id="btn-fakelib-deselect-all">Deselect All</button>
+                </div>
+              </div>
+              <div class="fakelib-description-text">
+                Parsed system module dependencies. Check to include or uncheck to exclude.
+              </div>
+              <div id="fakelib-list" class="fakelib-list">
+                <!-- Dynamically populated checkboxes -->
+              </div>
+            </div>
+
+            <!-- Workflow Actions: 1) Backport & Fakelibs 2) Build PKG -->
             <div class="actions-bar">
-              <button type="button" class="btn btn-primary btn-large" id="btn-build">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              <button type="button" class="btn btn-secondary btn-large" id="btn-stage-backport" title="Downpatch binaries and scan/stage compatibility fakelibs">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                </svg>
+                <span id="btn-stage-backport-text">Backport & Parse Fakelibs</span>
+              </button>
+              <button type="button" class="btn btn-primary btn-large" id="btn-build" title="Package game folder into PS5 PKG">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                </svg>
                 <span>Build PS5 Package</span>
               </button>
               <button type="button" class="btn btn-danger btn-large" id="btn-cancel" style="display: none;">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="15" y1="9" x2="9" y2="15"></line>
+                  <line x1="9" y1="9" x2="15" y2="15"></line>
+                </svg>
                 <span>Cancel Build</span>
               </button>
               <button type="button" class="btn btn-outline" id="btn-open-output" style="display: none;">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                  <polyline points="15 3 21 3 21 9"></polyline>
+                  <line x1="10" y1="14" x2="21" y2="3"></line>
+                </svg>
                 Open in Finder
               </button>
             </div>
@@ -244,10 +321,16 @@
               </div>
               <div class="console-actions">
                 <button type="button" class="btn-icon" id="btn-copy-log" title="Copy Log">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
                 </button>
                 <button type="button" class="btn-icon" id="btn-clear-log" title="Clear Console">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  </svg>
                 </button>
               </div>
             </div>
@@ -282,7 +365,13 @@
           </div>
 
           <div class="inspect-placeholder" id="inspect-placeholder">
-            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
             <p>Select a PS5 package file (.pkg) to inspect headers and entries</p>
           </div>
 
@@ -324,7 +413,8 @@
             <div class="table-container">
               <div class="table-header">
                 <h3>Package Entries</h3>
-                <input type="text" id="filter-entries" placeholder="Filter entries by name or ID..." class="input-filter">
+                <input type="text" id="filter-entries" placeholder="Filter entries by name or ID..."
+                  class="input-filter">
               </div>
               <table class="data-table" id="entries-table">
                 <thead>
@@ -365,7 +455,8 @@
                 <div class="unpack-form-row">
                   <label class="unpack-field-label">Output Directory</label>
                   <div class="unpack-field-input-wrap">
-                    <input type="text" id="unpack-out-dir" placeholder="Directory for unpacked files (or drop folder here)..." spellcheck="false">
+                    <input type="text" id="unpack-out-dir"
+                      placeholder="Directory for unpacked files (or drop folder here)..." spellcheck="false">
                     <button type="button" class="btn btn-secondary btn-sm" id="btn-browse-unpack-dir">Browse...</button>
                   </div>
                 </div>
@@ -373,20 +464,35 @@
                 <div class="unpack-form-row">
                   <label class="unpack-field-label">Passcode</label>
                   <div class="unpack-field-input-wrap">
-                    <input type="password" id="unpack-passcode" value="00000000000000000000000000000000" maxlength="32" spellcheck="false" class="passcode-input">
-                    <button type="button" class="btn btn-secondary btn-sm btn-icon" id="btn-toggle-passcode" title="Show/Hide">
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    <input type="password" id="unpack-passcode" value="00000000000000000000000000000000" maxlength="32"
+                      spellcheck="false" class="passcode-input">
+                    <button type="button" class="btn btn-secondary btn-sm btn-icon" id="btn-toggle-passcode"
+                      title="Show/Hide">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
                     </button>
                   </div>
                 </div>
 
                 <div class="unpack-btn-bar">
                   <button type="button" class="btn btn-primary btn-sm" id="btn-run-quick-verify">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                      stroke-width="2.2">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                      <polyline points="9 12 11 14 15 10"></polyline>
+                    </svg>
                     <span>Quick Verify</span>
                   </button>
                   <button type="button" class="btn btn-secondary btn-sm" id="btn-run-unpack">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                      stroke-width="2.2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="7 10 12 15 17 10"></polyline>
+                      <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
                     <span>Unpack</span>
                   </button>
                 </div>
@@ -461,7 +567,12 @@
                   <div class="pkg-cover-frame" id="pkg-cover-frame">
                     <img id="pkg-cover-image" src="" alt="Cover Artwork" style="display: none;">
                     <div class="pkg-cover-empty" id="pkg-cover-empty">
-                      <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                      <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor"
+                        stroke-width="1.5">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                        <polyline points="21 15 16 10 5 21"></polyline>
+                      </svg>
                       <span>No Cover Artwork</span>
                     </div>
                   </div>
@@ -477,10 +588,16 @@
                 <div class="group-box-title">Unpack & Verification Log</div>
                 <div class="console-actions">
                   <button type="button" class="btn-icon btn-sm" id="btn-copy-unpack-log" title="Copy Log">
-                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
                   </button>
                   <button type="button" class="btn-icon btn-sm" id="btn-clear-unpack-log" title="Clear Log">
-                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
                   </button>
                 </div>
               </div>
@@ -500,11 +617,12 @@
           </div>
           <div class="unpack-status-text-label" id="unpack-status-text-label">Ready</div>
         </div>
-        </div>
-      </section>
-    </main>
+  </div>
+  </section>
+  </main>
   </div>
 
   <script src="app.js"></script>
 </body>
+
 </html>

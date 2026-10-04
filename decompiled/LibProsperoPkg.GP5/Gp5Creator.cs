@@ -68,10 +68,14 @@ public static class Gp5Creator
 		foreach (string item in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).OrderBy((string path) => Path.GetRelativePath(root, path), StringComparer.Ordinal))
 		{
 			string fileName = Path.GetFileName(item);
-			if (fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
+			if (fileName.StartsWith("._", StringComparison.Ordinal) ||
+			    fileName.Equals(".DS_Store", StringComparison.OrdinalIgnoreCase) ||
+			    fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
 			    fileName.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase) ||
 			    fileName.EndsWith(".gp4", StringComparison.OrdinalIgnoreCase) ||
-			    fileName.EndsWith(".gp5", StringComparison.OrdinalIgnoreCase))
+			    fileName.EndsWith(".gp5", StringComparison.OrdinalIgnoreCase) ||
+			    item.Contains("__MACOSX") ||
+			    item.Contains(".Trashes"))
 			{
 				continue;
 			}

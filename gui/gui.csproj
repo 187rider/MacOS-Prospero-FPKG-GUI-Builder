@@ -34,6 +34,7 @@
   <ItemGroup>
     <None Include="../runtimes/**/*" LinkBase="runtimes" CopyToOutputDirectory="PreserveNewest" />
     <None Include="wwwroot/**/*" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Resources/**/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using LibProsperoPkg.PFS.Compression.Oodle;
 
 namespace LibProsperoPkg.PFS.Compression;
@@ -131,23 +132,31 @@ public sealed class ProsperoCompressedPfsFile
 	public byte[] Decompress()
 	{
 		byte[] array = new byte[UncompressedSize];
-		foreach (ProsperoPfsBlock block in Blocks)
+		Exception? failure = null;
+		object sync = new object();
+
+		Parallel.ForEach(Blocks, (block, state) =>
 		{
 			Span<byte> span = array.AsSpan((int)block.UncompressedOffset, block.UncompressedSize);
-			ReadOnlyMemory<byte> compressedData;
 			if (block.IsStored)
 			{
-				compressedData = block.CompressedData;
-				compressedData.Span.CopyTo(span);
-				continue;
+				block.CompressedData.Span.CopyTo(span);
+				return;
 			}
-			compressedData = block.CompressedData;
-			KrakenDecodeStatus krakenDecodeStatus = KrakenDecoder.DecodeBlock(compressedData.Span, block.Flags, block.FirstChunkCompressedSize, span);
-			if (krakenDecodeStatus == KrakenDecodeStatus.Success)
+			KrakenDecodeStatus krakenDecodeStatus = KrakenDecoder.DecodeBlock(block.CompressedData.Span, block.Flags, block.FirstChunkCompressedSize, span);
+			if (krakenDecodeStatus != KrakenDecodeStatus.Success)
 			{
-				continue;
+				lock (sync)
+				{
+					failure ??= new InvalidDataException($"Block {block.Index} could not be decoded ({krakenDecodeStatus}).");
+				}
+				state.Stop();
 			}
-			throw new InvalidDataException($"Block {block.Index} could not be decoded ({krakenDecodeStatus}).");
+		});
+
+		if (failure != null)
+		{
+			throw failure;
 		}
 		return array;
 	}

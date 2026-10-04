@@ -344,7 +344,7 @@ public static class ProsperoFself
 		{
 			throw new ArgumentException("The ELF has no loadable segment content.", "elf");
 		}
-		bool isOrbisContainer = options.UseOrbisContainer || (options.FirmwareVersion > 0 && options.FirmwareVersion < 0x0500000000000000uL);
+		bool isOrbisContainer = options.UseOrbisContainer;
 		int num5 = list.Count * 2;
 		int num6 = 32 + num5 * 32;
 		int num7 = 64 + num4 * 56;
@@ -958,19 +958,53 @@ public static class ProsperoFself
 		return count;
 	}
 
-	public record CompatibilityStubRule(string FileName, string ModuleName, ulong MinFirmwareSdk, string Description);
+	public record CompatibilityStubRule(string FileName, string ModuleName, ulong MinFirmwareSdk, string Description, string TargetSubdirectory = "fakelib");
 
 	public static readonly CompatibilityStubRule[] KnownCompatibilityModules =
 	[
-		new("libSceAmpr.sprx", "libSceAmpr", 0x0600000000000000uL, "Adaptive Media Playback (AMPR) streaming module"),
-		new("libScePsml.sprx", "libScePsml", 0x0600000000000000uL, "PlayStation Media Layer (PSML) module"),
-		new("libSceAgcDriver.sprx", "libSceAgcDriver", 0x0500000000000000uL, "Next-gen AGC driver graphics interface"),
-		new("libSceAgc.sprx", "libSceAgc", 0x0500000000000000uL, "Advanced Graphics Core (AGC) user module"),
-		new("libScePlayGo.sprx", "libScePlayGo", 0x0500000000000000uL, "PlayGo chunk streaming module"),
+		new("libSceAmpr.sprx", "libSceAmpr", 0x0600000000000000uL, "Adaptive Media Playback (AMPR) streaming module", "fakelib"),
+		new("libScePsml.sprx", "libScePsml", 0x0600000000000000uL, "PlayStation Media Layer (PSML) module", "fakelib"),
+		new("libSceAgcDriver.sprx", "libSceAgcDriver", 0x0500000000000000uL, "Next-gen AGC driver graphics interface", "fakelib"),
+		new("libSceAgc.sprx", "libSceAgc", 0x0500000000000000uL, "Advanced Graphics Core (AGC) user module", "fakelib"),
+		new("libSceVdecCore.native.sprx", "libSceVdecCore", 0x0600000000000000uL, "Hardware video decoder core runtime module", "fakelib"),
+		new("libSceVdecSavc2.native.sprx", "libSceVdecSavc2", 0x0600000000000000uL, "Hardware video decoder AVC/H.264 codec module", "fakelib"),
+		new("libSceVdecShevc.native.sprx", "libSceVdecShevc", 0x0600000000000000uL, "Hardware video decoder HEVC/H.265 codec module", "fakelib"),
+		new("libSceSaveData.native.sprx", "libSceSaveData_native", 0x0600000000000000uL, "Userland SaveData native bridge module", "fakelib"),
+		new("libScePlayGo.sprx", "libScePlayGo", 0x0500000000000000uL, "PlayGo chunk streaming module", "fakelib"),
+		new("libSceFiber.sprx", "libSceFiber", 0x0500000000000000uL, "Userland cooperative fiber threading runtime", "fakelib"),
+		new("libc.prx", "libc", 0x0500000000000000uL, "SceLibcV2 enhanced POSIX libc module", "sce_module"),
+		new("libSceNpCppWebApi.prx", "libSceNpCppWebApi", 0x0600000000000000uL, "PlayStation Network C++ Web API Client module", "sce_module"),
+		new("libSceFontGsm.prx", "libSceFontGsm", 0x0600000000000000uL, "System font glyph rasterizer / layout engine", "sce_module"),
+		new("libSceJobManager.prx", "libSceJobManager", 0x0600000000000000uL, "Asynchronous thread scheduling and job dispatch runtime", "sce_module"),
+		new("libScePfs.prx", "libScePfs", 0x0600000000000000uL, "Userland PlayGo / PFS container filesystem module", "sce_module"),
+		new("libSceFace.prx", "libSceFace", 0x0600000000000000uL, "Facial detection and animation runtime module", "sce_module"),
+		new("libSceFaceTracker.prx", "libSceFaceTracker", 0x0600000000000000uL, "Camera facial tracking runtime module", "sce_module"),
+		new("libSceAppContent.sprx", "libSceAppContent", 0x0600000000000000uL, "Application content mount and entitlement management", "fakelib"),
+		new("libSceGameUpdate.sprx", "libSceGameUpdate", 0x0600000000000000uL, "Game update check and patch metadata handler", "fakelib"),
+		new("libSceNpEntitlementAccess.sprx", "libSceNpEntitlementAccess", 0x0600000000000000uL, "PlayStation Network entitlement access shim", "fakelib"),
+		new("libkernel.sprx", "libkernel", 0x0500000000000000uL, "Kernel userland syscall bridge", "sce_module"),
+		new("right.sprx", "libSceGameRight", 0x0500000000000000uL, "Game right system stub module", "sce_sys/about"),
 	];
+
+	public static string GetModuleTargetSubdirectory(string fileName)
+	{
+		foreach (var rule in KnownCompatibilityModules)
+		{
+			if (rule.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase))
+			{
+				return rule.TargetSubdirectory;
+			}
+		}
+		return "fakelib";
+	}
 
 	public static bool IsModuleMissingOnTargetSdk(string fileName, ulong targetSdk)
 	{
+		if (fileName.StartsWith("libkernel", StringComparison.OrdinalIgnoreCase))
+		{
+			return false;
+		}
+
 		foreach (var rule in KnownCompatibilityModules)
 		{
 			if (rule.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase))
@@ -991,6 +1025,9 @@ public static class ProsperoFself
 
 		foreach (var rule in KnownCompatibilityModules)
 		{
+			if (rule.FileName.StartsWith("libkernel", StringComparison.OrdinalIgnoreCase)) continue;
+
+			// Exact filename match (e.g. "libSceAmpr.sprx")
 			byte[] fileBytes = Encoding.ASCII.GetBytes(rule.FileName);
 			if (elf.IndexOf(fileBytes) >= 0)
 			{
@@ -998,11 +1035,64 @@ public static class ProsperoFself
 				continue;
 			}
 
-			byte[] modBytes = Encoding.ASCII.GetBytes(rule.ModuleName + "\0");
-			if (elf.IndexOf(modBytes) >= 0)
+			// Match .prx counterpart if rule is .sprx or vice versa
+			string altName = rule.FileName.EndsWith(".sprx", StringComparison.OrdinalIgnoreCase)
+				? Path.GetFileNameWithoutExtension(rule.FileName) + ".prx"
+				: (rule.FileName.EndsWith(".prx", StringComparison.OrdinalIgnoreCase)
+					? Path.GetFileNameWithoutExtension(rule.FileName) + ".sprx"
+					: "");
+			if (!string.IsNullOrEmpty(altName))
 			{
-				detected.Add(rule.FileName);
+				byte[] altBytes = Encoding.ASCII.GetBytes(altName);
+				if (elf.IndexOf(altBytes) >= 0)
+				{
+					detected.Add(rule.FileName);
+					continue;
+				}
 			}
+
+			// Only match module name with null terminator for specific SCE system libraries
+			if (rule.ModuleName.StartsWith("libSce", StringComparison.OrdinalIgnoreCase))
+			{
+				byte[] modBytes = Encoding.ASCII.GetBytes(rule.ModuleName + "\0");
+				if (elf.IndexOf(modBytes) >= 0)
+				{
+					detected.Add(rule.FileName);
+				}
+			}
+		}
+
+		// Check for AvPlayer / Vdec video decoding stack
+		byte[] avPlayerBytes = Encoding.ASCII.GetBytes("libSceAvPlayer");
+		byte[] vdecBytes = Encoding.ASCII.GetBytes("libSceVdec");
+		if (elf.IndexOf(avPlayerBytes) >= 0 || elf.IndexOf(vdecBytes) >= 0)
+		{
+			detected.Add("libSceVdecCore.native.sprx");
+			detected.Add("libSceVdecSavc2.native.sprx");
+			detected.Add("libSceVdecShevc.native.sprx");
+		}
+
+		// Check for libScePsml_debug (used by Unity/IL2CPP titles like Onimusha)
+		byte[] psmlDebugBytes = Encoding.ASCII.GetBytes("libScePsml_debug");
+		if (elf.IndexOf(psmlDebugBytes) >= 0)
+		{
+			detected.Add("libScePsml.sprx");
+		}
+
+		// Check for digital rights / entitlement management (DRM bypass stub in sce_sys/about/)
+		byte[] entitlementBytes = Encoding.ASCII.GetBytes("libSceNpEntitlementAccess");
+		byte[] commerceBytes = Encoding.ASCII.GetBytes("libSceNpCommerce");
+		byte[] gameRightBytes = Encoding.ASCII.GetBytes("libSceGameRight");
+		if (elf.IndexOf(entitlementBytes) >= 0 || elf.IndexOf(commerceBytes) >= 0 || elf.IndexOf(gameRightBytes) >= 0)
+		{
+			detected.Add("right.sprx");
+		}
+
+		// Check for cooperative user-level threading (ULT) requiring libSceFiber
+		byte[] ultBytes = Encoding.ASCII.GetBytes("libSceUlt");
+		if (elf.IndexOf(ultBytes) >= 0)
+		{
+			detected.Add("libSceFiber.sprx");
 		}
 
 		if (additionalFiles != null)
@@ -1011,17 +1101,18 @@ public static class ProsperoFself
 			{
 				string fname = Path.GetFileName(file);
 				if (detected.Contains(fname)) continue;
+				if (fname.Equals("k9.psp", StringComparison.OrdinalIgnoreCase)) continue;
+				if (fname.StartsWith("libkernel", StringComparison.OrdinalIgnoreCase)) continue;
 
-				string mname = Path.GetFileNameWithoutExtension(fname);
-				byte[] fileBytes = Encoding.ASCII.GetBytes(fname);
-				if (elf.IndexOf(fileBytes) >= 0)
+				// Only consider PRX / SPRX modules
+				if (!fname.EndsWith(".prx", StringComparison.OrdinalIgnoreCase) &&
+				    !fname.EndsWith(".sprx", StringComparison.OrdinalIgnoreCase))
 				{
-					detected.Add(fname);
 					continue;
 				}
 
-				byte[] modBytes = Encoding.ASCII.GetBytes(mname + "\0");
-				if (elf.IndexOf(modBytes) >= 0)
+				byte[] fileBytes = Encoding.ASCII.GetBytes(fname);
+				if (elf.IndexOf(fileBytes) >= 0)
 				{
 					detected.Add(fname);
 				}
@@ -1041,8 +1132,9 @@ public static class ProsperoFself
 	/// <param name="cancellationToken">Cancellation token.</param>
 	/// <param name="targetSdkVersion">Optional target SDK version to down-patch executables to (e.g. 0x0400000000000000).</param>
 	/// <param name="bundledFakelibDir">Optional path to bundled fakelib stubs for selective dependency injection.</param>
+	/// <param name="excludedFakelibs">Optional set of fakelib file names to exclude from staging.</param>
 	/// <returns>Number of ELFs converted to FSELF.</returns>
-	public static int RecursiveMakeFself(string sourceDir, Action<string>? logger = null, CancellationToken cancellationToken = default, ulong? targetSdkVersion = null, string? bundledFakelibDir = null)
+	public static int RecursiveMakeFself(string sourceDir, Action<string>? logger = null, CancellationToken cancellationToken = default, ulong? targetSdkVersion = null, string? bundledFakelibDir = null, IEnumerable<string>? excludedFakelibs = null)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(sourceDir, nameof(sourceDir));
 		if (!Directory.Exists(sourceDir)) return 0;
@@ -1109,11 +1201,15 @@ public static class ProsperoFself
 				cancellationToken.ThrowIfCancellationRequested();
 
 				string ext = Path.GetExtension(file).ToLowerInvariant();
+				string name = Path.GetFileName(file);
+				if (name.StartsWith("._", StringComparison.Ordinal) || name.Equals(".DS_Store", StringComparison.OrdinalIgnoreCase)) continue;
 				if (!extensions.Contains(ext) || file.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase)) continue;
 
 				string relPath = Path.GetRelativePath(sourceDir, file);
 				string[] pathParts = relPath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-				if (pathParts.Any(p => p.Equals("fakelib", StringComparison.OrdinalIgnoreCase)))
+				if (pathParts.Any(p => p.Equals("fakelib", StringComparison.OrdinalIgnoreCase)) ||
+				    KnownCompatibilityModules.Any(m => m.FileName.Equals(name, StringComparison.OrdinalIgnoreCase) &&
+				                                      relPath.Replace('\\', '/').StartsWith(m.TargetSubdirectory + "/", StringComparison.OrdinalIgnoreCase)))
 				{
 					continue;
 				}
@@ -1204,8 +1300,6 @@ public static class ProsperoFself
 						}
 					}
 
-					bool isOrbisTarget = targetSdkVersion.HasValue && targetSdkVersion.Value > 0 && targetSdkVersion.Value < 0x0500000000000000uL;
-
 					if (targetSdkVersion.HasValue && targetSdkVersion.Value > 0)
 					{
 						PatchElfSceVersionSection(elfBytes, targetSdkVersion.Value);
@@ -1238,8 +1332,7 @@ public static class ProsperoFself
 						{
 							SceVersionRecords = selfTrailer,
 							FirmwareVersion = targetSdkVersion ?? 0uL,
-							UseOrbisContainer = isOrbisTarget,
-							ProgramType = isOrbisTarget ? 0x00000101u : 268435713u
+							ProgramType = 268435713u
 						};
 					}
 					else if (!fileName.Equals("eboot.bin", StringComparison.OrdinalIgnoreCase) &&
@@ -1251,8 +1344,7 @@ public static class ProsperoFself
 							SceVersionName = Path.GetFileNameWithoutExtension(fileName),
 							SceVersionRecord = applicationSceVersion,
 							FirmwareVersion = targetSdkVersion ?? 0uL,
-							UseOrbisContainer = isOrbisTarget,
-							ProgramType = isOrbisTarget ? 0x00000101u : 268435713u
+							ProgramType = 268435713u
 						};
 					}
 					else if (targetSdkVersion.HasValue && targetSdkVersion.Value > 0)
@@ -1260,16 +1352,7 @@ public static class ProsperoFself
 						options = new FselfOptions
 						{
 							FirmwareVersion = targetSdkVersion.Value,
-							UseOrbisContainer = isOrbisTarget,
-							ProgramType = isOrbisTarget ? 0x00000101u : 268435713u
-						};
-					}
-					else if (isOrbisTarget)
-					{
-						options = new FselfOptions
-						{
-							UseOrbisContainer = true,
-							ProgramType = 0x00000101u
+							ProgramType = 268435713u
 						};
 					}
 
@@ -1288,13 +1371,9 @@ public static class ProsperoFself
 					File.WriteAllBytes(file, fself);
 					convertedCount++;
 
-					if (isOrbisTarget)
+					if (targetSdkVersion.HasValue && targetSdkVersion.Value > 0)
 					{
-						logger?.Invoke($"[stage 0/5] Fake-signed legacy Orbis FSELF (0x1D3D154F) [Backported 0x{targetSdkVersion!.Value:X16} for FW 3.xx-4.xx]: {relPath} ({fself.Length:N0} bytes)");
-					}
-					else if (targetSdkVersion.HasValue && targetSdkVersion.Value > 0)
-					{
-						logger?.Invoke($"[stage 0/5] Fake-signed native PS5 FSELF [Backported 0x{targetSdkVersion.Value:X16}]: {relPath} ({fself.Length:N0} bytes)");
+						logger?.Invoke($"[stage 0/5] Fake-signed native PS5 FSELF (0xEEF51454) [Backported 0x{targetSdkVersion.Value:X16}]: {relPath} ({fself.Length:N0} bytes)");
 					}
 					else
 					{
@@ -1325,6 +1404,17 @@ public static class ProsperoFself
 				logger?.Invoke($"[stage 0/5]   - Section header tables sanitized: {sanitizedCount}");
 			}
 
+			string tmpAmprIndex = Path.Combine(sourceDir, "ampr_emu.index.tmp");
+			if (File.Exists(tmpAmprIndex))
+			{
+				try
+				{
+					File.Delete(tmpAmprIndex);
+					logger?.Invoke("[stage 0/5] [Backport] Cleaned up stale ampr_emu.index.tmp to prevent cutscene memory allocation crash.");
+				}
+				catch { }
+			}
+
 			if (!string.IsNullOrEmpty(bundledFakelibDir) && Directory.Exists(bundledFakelibDir))
 			{
 				var missingStubs = detectedCompatibilityImports
@@ -1333,32 +1423,64 @@ public static class ProsperoFself
 
 				if (missingStubs.Count > 0)
 				{
-					string fakelibDir = Path.Combine(sourceDir, "fakelib");
-					Directory.CreateDirectory(fakelibDir);
 					int stagedCount = 0;
+					var excludedSet = excludedFakelibs != null
+						? new HashSet<string>(excludedFakelibs, StringComparer.OrdinalIgnoreCase)
+						: null;
+
 					foreach (var stubName in missingStubs)
 					{
+						if (excludedSet != null && excludedSet.Contains(stubName))
+						{
+							logger?.Invoke($"[stage 0/5] [Backport] Skipping user-excluded fakelib '{stubName}'.");
+							continue;
+						}
+
+						string subDir = GetModuleTargetSubdirectory(stubName);
+						string targetDir = Path.Combine(sourceDir, subDir);
+						Directory.CreateDirectory(targetDir);
+
 						string bundledPath = Path.Combine(bundledFakelibDir, stubName);
-						string targetPath = Path.Combine(fakelibDir, stubName);
+						string targetPath = Path.Combine(targetDir, stubName);
 						if (File.Exists(bundledPath) && !File.Exists(targetPath))
 						{
 							try
 							{
 								File.Copy(bundledPath, targetPath, overwrite: false);
 								stagedCount++;
-								logger?.Invoke($"[stage 0/5] [Backport] Staged missing system module '{stubName}' in fakelib/ (Target SDK 0x{targetSdkVersion.Value:X16} lacks native module).");
+								string displayDir = string.IsNullOrEmpty(subDir) ? "app0/" : subDir + "/";
+								logger?.Invoke($"[stage 0/5] [Backport] Staged missing system module '{stubName}' in {displayDir} (Target SDK 0x{targetSdkVersion.Value:X16} lacks native module).");
 							}
 							catch { }
 						}
 					}
+
+					// If libScePsml.sprx was staged or needed, also stage its companion KPN neural model k9.psp to root if available
+					// Note: .psp is ALWAYS applied silently in background; NEVER excluded or shown to user.
+					if (missingStubs.Contains("libScePsml.sprx", StringComparer.OrdinalIgnoreCase))
+					{
+						string bundledK9 = Path.Combine(bundledFakelibDir, "k9.psp");
+						string targetK9 = Path.Combine(sourceDir, "k9.psp");
+						if (File.Exists(bundledK9) && !File.Exists(targetK9))
+						{
+							try
+							{
+								File.Copy(bundledK9, targetK9, overwrite: false);
+								stagedCount++;
+								logger?.Invoke("[stage 0/5] [Backport] Staged companion neural model 'k9.psp' in app0/ for libScePsml (MFSR / KPN upscaler).");
+							}
+							catch { }
+						}
+					}
+
 					if (stagedCount > 0)
 					{
-						logger?.Invoke($"[stage 0/5] [Backport] Staged {stagedCount} required compatibility module(s) in fakelib/ for ShadowMount/OnionHEN.");
+						logger?.Invoke($"[stage 0/5] [Backport] Staged {stagedCount} required compatibility module(s) for ShadowMount/OnionHEN/FW 4.xx backport.");
 					}
 				}
 				else
 				{
-					logger?.Invoke($"[stage 0/5] [Backport] Dynamic dependency check: 0 missing compatibility stubs required for Target SDK 0x{targetSdkVersion.Value:X16}. fakelib staging skipped.");
+					logger?.Invoke($"[stage 0/5] [Backport] Dynamic dependency check: 0 missing compatibility stubs required for Target SDK 0x{targetSdkVersion.Value:X16}. Compatibility staging skipped.");
 				}
 			}
 		}
@@ -1435,5 +1557,575 @@ public static class ProsperoFself
 
 		elf = elfBuffer;
 		return true;
+	}
+
+	public record FakelibParsedItem(
+		string FileName,
+		string ModuleName,
+		string TargetSubdirectory,
+		string Description,
+		long Size,
+		string SizeFormatted,
+		bool IsRequired,
+		bool IsStaged,
+		bool IsMissingStub = false,
+		bool IsEbootBypassed = false,
+		string? StatusMessage = null
+	)
+	{
+		public bool HasAnomaly => IsMissingStub;
+		public string? AnomalyReason => IsMissingStub ? (StatusMessage ?? "Missing stub in project folder") : null;
+	}
+
+	public record EbootSyncResult(
+		bool Success,
+		int PatchedCount,
+		int RestoredCount,
+		List<string> BypassedModules,
+		List<string> RestoredModules,
+		string Message
+	);
+
+	/// <summary>
+	/// Checks if a compatibility module was originally imported by eboot.bin (in backup)
+	/// but is currently bypassed/neutralized in the active eboot.bin.
+	/// </summary>
+	public static bool IsModuleBypassedInEboot(string sourceDir, string fileName)
+	{
+		string ebootPath = Path.Combine(sourceDir, "eboot.bin");
+		string bakPath = Path.Combine(sourceDir, "eboot.bin.bak");
+		if (!File.Exists(ebootPath) || !File.Exists(bakPath)) return false;
+
+		try
+		{
+			byte[] nameBytes = Encoding.ASCII.GetBytes(fileName);
+			byte[] curBytes = File.ReadAllBytes(ebootPath);
+			if (curBytes.AsSpan().IndexOf(nameBytes) >= 0) return false;
+
+			byte[] bakBytes = File.ReadAllBytes(bakPath);
+			return bakBytes.AsSpan().IndexOf(nameBytes) >= 0;
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	/// <summary>
+	/// Scans executable binaries in sourceDir and cross-references against bundled fakelib stubs
+	/// and target SDK version to report candidate/detected fakelibs for interactive UI selection.
+	/// NOTE: Any .psp file is strictly background and is never returned in this list.
+	/// </summary>
+	public static List<FakelibParsedItem> GetDetectedFakelibStatus(
+		string sourceDir,
+		ulong targetSdkVersion,
+		string? bundledFakelibDir = null)
+	{
+		var result = new List<FakelibParsedItem>();
+		if (string.IsNullOrWhiteSpace(sourceDir) || !Directory.Exists(sourceDir))
+		{
+			return result;
+		}
+
+		var allImports = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		string[]? candidateFiles = null;
+		if (!string.IsNullOrEmpty(bundledFakelibDir) && Directory.Exists(bundledFakelibDir))
+		{
+			try
+			{
+				candidateFiles = Directory.EnumerateFiles(bundledFakelibDir, "*.*").ToArray();
+			}
+			catch { }
+		}
+
+		// Build exclusion set: never scan the fakelib stubs themselves as game ELFs.
+		var knownFakelibNames = new HashSet<string>(
+			KnownCompatibilityModules.Select(m => m.FileName),
+			StringComparer.OrdinalIgnoreCase);
+
+		string[] extensions = { ".bin", ".elf", ".prx", ".sprx" };
+		try
+		{
+			foreach (string file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
+			{
+				string ext = Path.GetExtension(file).ToLowerInvariant();
+				string name = Path.GetFileName(file);
+				if (name.StartsWith("._", StringComparison.Ordinal) || name.Equals(".DS_Store", StringComparison.OrdinalIgnoreCase)) continue;
+				if (!extensions.Contains(ext) || file.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase)) continue;
+
+				if (knownFakelibNames.Contains(name)) continue;
+
+				string relPath = Path.GetRelativePath(sourceDir, file);
+				string[] pathParts = relPath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+				if (pathParts.Any(p => p.Equals("fakelib", StringComparison.OrdinalIgnoreCase))) continue;
+
+				try
+				{
+					if (new FileInfo(file).Length < 64) continue;
+					byte[] elfBytes;
+					byte[] header = new byte[64];
+					using (var fs = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+					{
+						if (fs.Read(header, 0, 64) != 64) continue;
+					}
+
+					uint magic = BinaryPrimitives.ReadUInt32LittleEndian(header);
+					if (magic == Magic || magic == OrbisMagic)
+					{
+						byte[] selfBytes = File.ReadAllBytes(file);
+						if (TryUnfself(selfBytes, out byte[]? extractedElf) && extractedElf != null)
+						{
+							elfBytes = extractedElf;
+						}
+						else continue;
+					}
+					else if (IsElf(header))
+					{
+						elfBytes = File.ReadAllBytes(file);
+					}
+					else continue;
+
+					var importedLibs = DetectImportedCompatibilityModules(elfBytes, candidateFiles);
+					foreach (var lib in importedLibs)
+					{
+						allImports.Add(lib);
+					}
+				}
+				catch { }
+			}
+		}
+		catch { }
+
+		// Always ensure .psp companion is staged silently in background if PSML or ML is present
+		if (allImports.Contains("libScePsml.sprx") && !string.IsNullOrEmpty(bundledFakelibDir))
+		{
+			try
+			{
+				string bundledK9 = Path.Combine(bundledFakelibDir, "k9.psp");
+				string targetK9 = Path.Combine(sourceDir, "k9.psp");
+				if (File.Exists(bundledK9) && !File.Exists(targetK9))
+				{
+					File.Copy(bundledK9, targetK9, overwrite: false);
+				}
+			}
+			catch { }
+		}
+
+		// Enumerate known modules
+		foreach (var rule in KnownCompatibilityModules)
+		{
+			// CRITICAL: NEVER show .psp in the GUI
+			if (rule.FileName.EndsWith(".psp", StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			string targetPath = Path.Combine(sourceDir, rule.TargetSubdirectory, rule.FileName);
+			bool isStaged = File.Exists(targetPath);
+			bool isImported = allImports.Contains(rule.FileName);
+			bool isMissingOnSdk = IsModuleMissingOnTargetSdk(rule.FileName, targetSdkVersion);
+			bool isRequired = isImported && isMissingOnSdk;
+			bool isBypassed = IsModuleBypassedInEboot(sourceDir, rule.FileName);
+			bool isMissingStub = isRequired && !isStaged && !isBypassed;
+
+			string statusMessage;
+			if (isRequired && isStaged)
+			{
+				statusMessage = "Required: Imported by game ELF and staged in project";
+			}
+			else if (isMissingStub)
+			{
+				statusMessage = "Missing stub: Imported by game ELF, but missing from project folder";
+			}
+			else if (isBypassed)
+			{
+				statusMessage = "Bypassed: Dependency neutralized in eboot.bin (no stub needed)";
+			}
+			else if (isStaged)
+			{
+				statusMessage = "Optional: Staged in project folder";
+			}
+			else
+			{
+				statusMessage = "Optional module";
+			}
+
+			long fileSize = 0;
+			if (!string.IsNullOrEmpty(bundledFakelibDir))
+			{
+				string bPath = Path.Combine(bundledFakelibDir, rule.FileName);
+				if (File.Exists(bPath))
+				{
+					fileSize = new FileInfo(bPath).Length;
+				}
+			}
+			if (fileSize == 0 && isStaged)
+			{
+				fileSize = new FileInfo(targetPath).Length;
+			}
+
+			// Include if imported, or already staged in folder, or bypassed in eboot, or missing on target SDK and exists bundled
+			bool shouldShow = isImported || isStaged || isBypassed || (isMissingOnSdk && fileSize > 0);
+			if (shouldShow)
+			{
+				result.Add(new FakelibParsedItem(
+					FileName: rule.FileName,
+					ModuleName: rule.ModuleName,
+					TargetSubdirectory: rule.TargetSubdirectory,
+					Description: rule.Description,
+					Size: fileSize,
+					SizeFormatted: FormatBytesHelper(fileSize),
+					IsRequired: isRequired,
+					IsStaged: isStaged,
+					IsMissingStub: isMissingStub,
+					IsEbootBypassed: isBypassed,
+					StatusMessage: statusMessage
+				));
+			}
+		}
+
+		return result
+			.OrderByDescending(r => r.IsMissingStub)
+			.ThenByDescending(r => r.IsRequired)
+			.ThenByDescending(r => r.IsStaged)
+			.ThenBy(r => r.FileName)
+			.ToList();
+	}
+
+	/// <summary>
+	/// Stages all missing required compatibility modules from the bundled fakelib directory into the project folder.
+	/// </summary>
+	public static int StageAllMissingStubs(string sourceDir, string? bundledFakelibDir, ulong targetSdkVersion)
+	{
+		if (string.IsNullOrWhiteSpace(sourceDir) || !Directory.Exists(sourceDir)) return 0;
+		if (string.IsNullOrEmpty(bundledFakelibDir) || !Directory.Exists(bundledFakelibDir)) return 0;
+
+		var status = GetDetectedFakelibStatus(sourceDir, targetSdkVersion, bundledFakelibDir);
+		int count = 0;
+		foreach (var item in status.Where(f => f.IsMissingStub))
+		{
+			string targetDir = Path.Combine(sourceDir, item.TargetSubdirectory);
+			string targetPath = Path.Combine(targetDir, item.FileName);
+			string bundledPath = Path.Combine(bundledFakelibDir, item.FileName);
+			if (File.Exists(bundledPath) && !File.Exists(targetPath))
+			{
+				try
+				{
+					Directory.CreateDirectory(targetDir);
+					File.Copy(bundledPath, targetPath, overwrite: true);
+					count++;
+				}
+				catch { }
+			}
+		}
+		return count;
+	}
+
+	/// <summary>
+	/// Synchronizes a single fakelib file live in the target directory (app0/ or fakelib/ or sce_module/).
+	/// NOTE: Any .psp file is strictly background and cannot be manipulated or deleted via this method.
+	/// If syncEboot is true, also updates eboot.bin so binary dependencies match the staged state.
+	/// </summary>
+	public static bool SyncFakelibLive(string sourceDir, string fileName, bool enable, string? bundledFakelibDir, ulong targetSdkVersion = 0, bool syncEboot = false)
+	{
+		if (string.IsNullOrWhiteSpace(sourceDir) || string.IsNullOrWhiteSpace(fileName)) return false;
+
+		// CRITICAL: .psp files are strictly background. Never allow GUI toggle or deletion of .psp
+		if (fileName.EndsWith(".psp", StringComparison.OrdinalIgnoreCase)) return false;
+
+		string subDir = GetModuleTargetSubdirectory(fileName);
+		string targetDir = Path.Combine(sourceDir, subDir);
+		string targetPath = Path.Combine(targetDir, fileName);
+
+		if (enable)
+		{
+			if (string.IsNullOrEmpty(bundledFakelibDir)) return false;
+			string bundledPath = Path.Combine(bundledFakelibDir, fileName);
+			if (!File.Exists(bundledPath)) return false;
+
+			Directory.CreateDirectory(targetDir);
+			File.Copy(bundledPath, targetPath, overwrite: true);
+
+			if (syncEboot)
+			{
+				var activeList = new List<string> { fileName };
+				foreach (var r in KnownCompatibilityModules)
+				{
+					if (File.Exists(Path.Combine(sourceDir, r.TargetSubdirectory, r.FileName)))
+						activeList.Add(r.FileName);
+				}
+				SyncEbootWithFakelibs(sourceDir, activeList.Distinct(StringComparer.OrdinalIgnoreCase), targetSdkVersion, bundledFakelibDir);
+			}
+
+			return true;
+		}
+		else
+		{
+			// Flexible deletion: allow user to remove stubs (with optional eboot patch sync to prevent crash)
+			bool deleted = false;
+			if (File.Exists(targetPath))
+			{
+				File.Delete(targetPath);
+				deleted = true;
+				try
+				{
+					if (Directory.Exists(targetDir) && !Directory.EnumerateFileSystemEntries(targetDir).Any())
+					{
+						Directory.Delete(targetDir);
+					}
+				}
+				catch { }
+			}
+
+			if (syncEboot)
+			{
+				var activeList = new List<string>();
+				foreach (var r in KnownCompatibilityModules)
+				{
+					if (!r.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase) &&
+					    File.Exists(Path.Combine(sourceDir, r.TargetSubdirectory, r.FileName)))
+					{
+						activeList.Add(r.FileName);
+					}
+				}
+				SyncEbootWithFakelibs(sourceDir, activeList, targetSdkVersion, bundledFakelibDir);
+			}
+
+			return deleted || syncEboot;
+		}
+	}
+
+	/// <summary>
+	/// Synchronizes eboot.bin module import dependencies with the set of active/staged fakelibs:
+	/// - Disabled modules have their ELF dynamic imports neutralized/redirected to libkernel.sprx to prevent startup crashes.
+	/// - Enabled modules have their imports restored (from eboot.bin.bak).
+	/// - AMPR and other backport bypasses are automatically aligned.
+	/// </summary>
+	public static EbootSyncResult SyncEbootWithFakelibs(
+		string sourceDir,
+		IEnumerable<string> activeFakelibNames,
+		ulong targetSdkVersion,
+		string? bundledFakelibDir = null,
+		Action<string>? logger = null)
+	{
+		if (string.IsNullOrWhiteSpace(sourceDir) || !Directory.Exists(sourceDir))
+			return new EbootSyncResult(false, 0, 0, new(), new(), "Source directory does not exist.");
+
+		string ebootPath = Path.Combine(sourceDir, "eboot.bin");
+		if (!File.Exists(ebootPath))
+			return new EbootSyncResult(false, 0, 0, new(), new(), "eboot.bin not found in source directory.");
+
+		string bakPath = Path.Combine(sourceDir, "eboot.bin.bak");
+		if (!File.Exists(bakPath))
+		{
+			try { File.Copy(ebootPath, bakPath, overwrite: false); } catch { }
+		}
+
+		var activeSet = new HashSet<string>(activeFakelibNames, StringComparer.OrdinalIgnoreCase);
+		var bypassed = new List<string>();
+		var restored = new List<string>();
+
+		try
+		{
+			byte[] ebootBytes = File.ReadAllBytes(ebootPath);
+			byte[] elfBytes;
+			bool isFself = false;
+			FselfOptions? options = null;
+			uint magic = BinaryPrimitives.ReadUInt32LittleEndian(ebootBytes);
+
+			if (magic == Magic || magic == OrbisMagic)
+			{
+				isFself = true;
+				if (!TryUnfself(ebootBytes, out byte[]? extracted) || extracted == null)
+					return new EbootSyncResult(false, 0, 0, new(), new(), "Could not unpack eboot.bin FSELF.");
+				elfBytes = extracted;
+				var trailerSpan = GetSceVersionRecords(ebootBytes);
+				if (!trailerSpan.IsEmpty)
+				{
+					options = new FselfOptions
+					{
+						SceVersionRecords = targetSdkVersion > 0 ? PatchSceVersionRecords(trailerSpan.ToArray(), targetSdkVersion) : trailerSpan.ToArray(),
+						FirmwareVersion = targetSdkVersion > 0 ? targetSdkVersion : 0uL,
+						ProgramType = 268435713u
+					};
+				}
+				else if (targetSdkVersion > 0)
+				{
+					options = new FselfOptions
+					{
+						FirmwareVersion = targetSdkVersion,
+						ProgramType = 268435713u
+					};
+				}
+			}
+			else if (IsElf(ebootBytes.AsSpan(0, Math.Min(64, ebootBytes.Length))))
+			{
+				elfBytes = (byte[])ebootBytes.Clone();
+			}
+			else
+			{
+				return new EbootSyncResult(false, 0, 0, new(), new(), "eboot.bin is neither valid ELF nor FSELF.");
+			}
+
+			// Read backup for restoration reference if available
+			byte[]? bakElf = null;
+			if (File.Exists(bakPath))
+			{
+				try
+				{
+					byte[] bakBytes = File.ReadAllBytes(bakPath);
+					uint bMagic = BinaryPrimitives.ReadUInt32LittleEndian(bakBytes);
+					if (bMagic == Magic || bMagic == OrbisMagic)
+					{
+						if (TryUnfself(bakBytes, out byte[]? bExtracted) && bExtracted != null)
+							bakElf = bExtracted;
+					}
+					else if (IsElf(bakBytes.AsSpan(0, Math.Min(64, bakBytes.Length))))
+					{
+						bakElf = bakBytes;
+					}
+				}
+				catch { }
+			}
+
+			foreach (var rule in KnownCompatibilityModules)
+			{
+				if (rule.FileName.EndsWith(".psp", StringComparison.OrdinalIgnoreCase)) continue;
+				if (rule.FileName.StartsWith("libkernel", StringComparison.OrdinalIgnoreCase)) continue;
+
+				bool shouldBeActive = activeSet.Contains(rule.FileName);
+				byte[] nameBytes = Encoding.ASCII.GetBytes(rule.FileName);
+				string bypassStr = rule.FileName.Length >= 14 ? "libkernel.sprx" : "libk.prx";
+				byte[] bypassBytes = Encoding.ASCII.GetBytes(bypassStr.PadRight(rule.FileName.Length, '\0'));
+
+				if (!shouldBeActive)
+				{
+					// User wants this module DISABLED / BYPASSED:
+					// 1. Delete staged file from disk
+					string subDir = GetModuleTargetSubdirectory(rule.FileName);
+					string targetPath = Path.Combine(sourceDir, subDir, rule.FileName);
+					if (File.Exists(targetPath))
+					{
+						try { File.Delete(targetPath); } catch { }
+					}
+
+					// 2. Bypass in ELF if currently present
+					int matchIdx;
+					int searchPos = 0;
+					bool anyPatched = false;
+					while (searchPos + nameBytes.Length <= elfBytes.Length &&
+					       (matchIdx = elfBytes.AsSpan(searchPos).IndexOf(nameBytes)) >= 0)
+					{
+						int actualPos = searchPos + matchIdx;
+						bypassBytes.CopyTo(elfBytes, actualPos);
+						anyPatched = true;
+						searchPos = actualPos + bypassBytes.Length;
+					}
+
+					if (anyPatched)
+					{
+						bypassed.Add(rule.FileName);
+						logger?.Invoke($"[Eboot Patch Sync] Bypassed dependency '{rule.FileName}' in eboot.bin (redirected to libkernel)");
+					}
+
+					if (rule.FileName.Equals("libSceAmpr.sprx", StringComparison.OrdinalIgnoreCase))
+					{
+						PatchElfAmprBypass(elfBytes, logger);
+					}
+				}
+				else
+				{
+					// User wants this module ACTIVE / STAGED:
+					// 1. Stage file to disk from bundled if missing
+					if (!string.IsNullOrEmpty(bundledFakelibDir))
+					{
+						string subDir = GetModuleTargetSubdirectory(rule.FileName);
+						string targetDir = Path.Combine(sourceDir, subDir);
+						string targetPath = Path.Combine(targetDir, rule.FileName);
+						string bundledPath = Path.Combine(bundledFakelibDir, rule.FileName);
+						if (File.Exists(bundledPath) && !File.Exists(targetPath))
+						{
+							try
+							{
+								Directory.CreateDirectory(targetDir);
+								File.Copy(bundledPath, targetPath, overwrite: true);
+							}
+							catch { }
+						}
+					}
+
+					// 2. Restore in ELF if it was bypassed and backup has it
+					if (bakElf != null)
+					{
+						int bSearchPos = 0;
+						int bIdx;
+						bool anyRestored = false;
+						while (bSearchPos + nameBytes.Length <= bakElf.Length &&
+						       (bIdx = bakElf.AsSpan(bSearchPos).IndexOf(nameBytes)) >= 0)
+						{
+							int actualPos = bSearchPos + bIdx;
+							if (actualPos + nameBytes.Length <= elfBytes.Length)
+							{
+								if (elfBytes.AsSpan(actualPos, nameBytes.Length).SequenceEqual(bypassBytes))
+								{
+									nameBytes.CopyTo(elfBytes, actualPos);
+									anyRestored = true;
+								}
+							}
+							bSearchPos = actualPos + nameBytes.Length;
+						}
+
+						if (anyRestored)
+						{
+							restored.Add(rule.FileName);
+							logger?.Invoke($"[Eboot Patch Sync] Restored dependency '{rule.FileName}' in eboot.bin");
+						}
+					}
+				}
+			}
+
+			// Apply target SDK version patches if targetSdk > 0
+			if (targetSdkVersion > 0)
+			{
+				PatchElfSceVersionSection(elfBytes, targetSdkVersion);
+				PatchElfProcParam(elfBytes, targetSdkVersion);
+				PatchElfSymbolVersions(elfBytes, targetSdkVersion, logger);
+				PatchElfExecutableBackport(elfBytes, targetSdkVersion, logger);
+			}
+
+			// Write back
+			if (isFself)
+			{
+				byte[] fself = MakeFself(elfBytes, options);
+				File.WriteAllBytes(ebootPath, fself);
+			}
+			else
+			{
+				File.WriteAllBytes(ebootPath, elfBytes);
+			}
+
+			string summary = $"Synchronized eboot.bin: {bypassed.Count} bypassed, {restored.Count} restored.";
+			logger?.Invoke($"[Eboot Patch Sync] {summary}");
+			return new EbootSyncResult(true, bypassed.Count, restored.Count, bypassed, restored, summary);
+		}
+		catch (Exception ex)
+		{
+			logger?.Invoke($"[Eboot Patch Sync Error] {ex.Message}");
+			return new EbootSyncResult(false, 0, 0, bypassed, restored, ex.Message);
+		}
+	}
+
+	private static string FormatBytesHelper(long bytes)
+	{
+		if (bytes <= 0) return "0 B";
+		string[] units = { "B", "KB", "MB", "GB" };
+		double len = bytes;
+		int order = 0;
+		while (len >= 1024 && order < units.Length - 1)
+		{
+			order++;
+			len /= 1024;
+		}
+		return $"{len:0.##} {units[order]}";
 	}
 }

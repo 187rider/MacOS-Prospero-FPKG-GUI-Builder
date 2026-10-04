@@ -22,6 +22,8 @@
   const btnBrowseSource = document.getElementById('btn-browse-source');
   const inputOutput = document.getElementById('input-output');
   const btnBrowseOutput = document.getElementById('btn-browse-output');
+  const inputWorkdir = document.getElementById('input-workdir');
+  const btnBrowseWorkdir = document.getElementById('btn-browse-workdir');
   const sourceBadge = document.getElementById('source-badge');
   const metadataBanner = document.getElementById('metadata-banner');
   const metaTitleText = document.getElementById('meta-title-text');
@@ -44,6 +46,16 @@
   const selectBackportSdk = document.getElementById('select-backport-sdk');
   const backportSdkContainer = document.getElementById('backport-sdk-container');
   const chkAlreadyPatched = document.getElementById('chk-already-patched');
+
+  const btnStageBackport = document.getElementById('btn-stage-backport');
+  const btnStageBackportText = document.getElementById('btn-stage-backport-text');
+  const fakelibSelectionContainer = document.getElementById('fakelib-selection-container');
+  const fakelibCountBadge = document.getElementById('fakelib-count-badge');
+  const fakelibList = document.getElementById('fakelib-list');
+  const btnFakelibReset = document.getElementById('btn-fakelib-reset');
+  const btnFakelibSelectAll = document.getElementById('btn-fakelib-select-all');
+  const btnFakelibDeselectAll = document.getElementById('btn-fakelib-deselect-all');
+  let currentFakelibs = [];
 
   const btnBuild = document.getElementById('btn-build');
   const btnCancel = document.getElementById('btn-cancel');
@@ -133,6 +145,10 @@
     isBuilding = false;
     btnBuild.style.display = 'inline-flex';
     btnBuild.disabled = false;
+    if (btnStageBackport) {
+      btnStageBackport.disabled = false;
+      if (btnStageBackportText) btnStageBackportText.textContent = 'Backport & Parse Fakelibs';
+    }
     if (btnCancel) {
       btnCancel.style.display = 'none';
       btnCancel.disabled = false;
@@ -155,6 +171,8 @@
           }
         } else if (data.target === 'output') {
           inputOutput.value = data.path;
+        } else if (data.target === 'workDir') {
+          if (inputWorkdir) inputWorkdir.value = data.path;
         } else if (data.target === 'unpackDir') {
           unpackOutDir.value = data.path;
         }
@@ -228,10 +246,61 @@
         appendLog(data.log, detectLogClass(data.log), data.timestamp);
         break;
 
+      case 'backportCompleted':
+        if (btnStageBackport) {
+          btnStageBackport.disabled = false;
+          if (btnStageBackportText) btnStageBackportText.textContent = 'Backport & Parse Fakelibs';
+        }
+        if (fakelibSelectionContainer) {
+          fakelibSelectionContainer.style.display = 'block';
+        }
+        currentFakelibs = (data.fakelibs || []).filter(f => !f.fileName.toLowerCase().endsWith('.psp'));
+        renderFakelibsList(currentFakelibs);
+        setGlobalStatus('ready', `Backport complete • ${currentFakelibs.length} fakelibs parsed`);
+        break;
+
+      case 'backportError':
+        if (btnStageBackport) {
+          btnStageBackport.disabled = false;
+          if (btnStageBackportText) btnStageBackportText.textContent = 'Backport & Parse Fakelibs';
+        }
+        alert(`Backport error: ${data.message}`);
+        break;
+
+      case 'fakelibToggled':
+        if (data.fakelibs) {
+          currentFakelibs = data.fakelibs.filter(f => !f.fileName.toLowerCase().endsWith('.psp'));
+          renderFakelibsList(currentFakelibs);
+        } else {
+          updateFakelibStagedState(data.fileName, data.staged);
+        }
+        break;
+
+      case 'fakelibsSynced':
+        if (data.fakelibs) {
+          currentFakelibs = data.fakelibs.filter(f => !f.fileName.toLowerCase().endsWith('.psp'));
+          renderFakelibsList(currentFakelibs);
+        }
+        break;
+
+      case 'resetFakelibs':
+      case 'stageMissingFakelibs':
+      case 'fakelibsUpdated':
+        if (btnFakelibReset) {
+          btnFakelibReset.disabled = false;
+          btnFakelibReset.textContent = 'RST';
+        }
+        if (data.fakelibs) {
+          currentFakelibs = data.fakelibs.filter(f => !f.fileName.toLowerCase().endsWith('.psp'));
+          renderFakelibsList(currentFakelibs);
+        }
+        break;
+
       case 'buildCompleted':
         resetBuildButtons();
         setGlobalStatus('ready', 'Build Successful (100%)');
         updateProgress(100, 'Done', 'Build complete!');
+        playCompletionSound();
         if (globalTopProgressFill) globalTopProgressFill.style.width = '100%';
         setTimeout(() => {
           if (!isBuilding) {
@@ -349,8 +418,17 @@
     sendToHost('browseFolder', { target: 'output' });
   });
 
+  if (btnBrowseWorkdir) {
+    btnBrowseWorkdir.addEventListener('click', () => {
+      sendToHost('browseFolder', { target: 'workDir' });
+    });
+  }
+
   inputSource.addEventListener('change', () => {
     const path = inputSource.value.trim();
+    if (fakelibSelectionContainer) fakelibSelectionContainer.style.display = 'none';
+    if (fakelibList) fakelibList.innerHTML = '';
+    currentFakelibs = [];
     if (path) {
       sendToHost('scanMetadata', { path });
       if (!inputOutput.value) {
@@ -358,6 +436,166 @@
       }
     }
   });
+
+  // Stage Backport & Fakelibs Action Button
+  if (btnStageBackport) {
+    btnStageBackport.addEventListener('click', () => {
+      const source = inputSource.value.trim();
+      if (!source) {
+        alert('Please select a source folder containing your game/app files first.');
+        return;
+      }
+      btnStageBackport.disabled = true;
+      if (btnStageBackportText) btnStageBackportText.textContent = 'Backporting & Scanning...';
+      appendLog(`[Backport] Starting Stage 0 backport & fakelib scan for: ${source}`, 'stage');
+
+      sendToHost('stageBackport', {
+        source,
+        targetSdk: selectBackportSdk ? selectBackportSdk.value : '0x0400000000000000',
+        autoFself: chkFself ? chkFself.checked : true
+      });
+    });
+  }
+
+  if (btnFakelibReset) {
+    btnFakelibReset.addEventListener('click', () => {
+      const source = inputSource.value.trim();
+      if (!source) return;
+      btnFakelibReset.disabled = true;
+      btnFakelibReset.textContent = '...';
+      sendToHost('resetFakelibs', {
+        source,
+        targetSdk: selectBackportSdk?.value || '0x0400000000000000'
+      });
+    });
+  }
+
+  if (btnFakelibSelectAll) {
+    btnFakelibSelectAll.addEventListener('click', () => {
+      const source = inputSource.value.trim();
+      if (!source) return;
+      const allCheckboxes = document.querySelectorAll('.chk-fakelib-item');
+      const allFiles = [];
+      allCheckboxes.forEach(cb => {
+        cb.checked = true;
+        allFiles.push(cb.dataset.filename);
+      });
+      updateFakelibCount();
+      sendToHost('syncFakelibs', {
+        source,
+        enabledFiles: allFiles,
+        targetSdk: selectBackportSdk?.value || '0x0400000000000000'
+      });
+    });
+  }
+
+  if (btnFakelibDeselectAll) {
+    btnFakelibDeselectAll.addEventListener('click', () => {
+      const source = inputSource.value.trim();
+      if (!source) return;
+      const allCheckboxes = document.querySelectorAll('.chk-fakelib-item');
+      allCheckboxes.forEach(cb => {
+        cb.checked = false;
+      });
+      updateFakelibCount();
+      sendToHost('syncFakelibs', {
+        source,
+        enabledFiles: [],
+        targetSdk: selectBackportSdk?.value || '0x0400000000000000'
+      });
+    });
+  }
+
+  function renderFakelibsList(fakelibs) {
+    if (!fakelibList) return;
+    fakelibList.innerHTML = '';
+
+    // Safety rule: Never display any .psp file to the user
+    const displayList = (fakelibs || []).filter(f => !f.fileName.toLowerCase().endsWith('.psp'));
+
+    if (fakelibCountBadge) {
+      const stagedCount = displayList.filter(f => f.isStaged).length;
+      fakelibCountBadge.textContent = `${stagedCount} of ${displayList.length} staged`;
+      fakelibCountBadge.className = stagedCount > 0 ? 'badge success' : 'badge';
+    }
+
+    if (displayList.length === 0) {
+      fakelibList.innerHTML = '<div style="font-size: 11.5px; color: var(--text-tertiary); padding: 8px 4px;">No compatibility fakelibs required for this game dump.</div>';
+      return;
+    }
+
+    displayList.forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'fakelib-item';
+      row.id = `fakelib-item-${sanitizeDomId(item.fileName)}`;
+
+      // Badges: REQUIRED / OPTIONAL
+      let badgeHtml = '';
+      if (item.isRequired) {
+        badgeHtml = `<span class="badge-required" title="Imported by game ELF on target SDK">REQUIRED</span>`;
+      } else if (item.isStaged) {
+        badgeHtml = `<span class="badge-optional" title="Optional staged stub">OPTIONAL</span>`;
+      }
+
+      const checkedAttr = item.isStaged ? 'checked' : '';
+
+      row.innerHTML = `
+        <div class="fakelib-item-left">
+          <label class="checkbox-container" style="margin: 0;">
+            <input type="checkbox" class="chk-fakelib-item" data-filename="${escapeHtml(item.fileName)}" data-required="${item.isRequired ? '1' : '0'}" ${checkedAttr}>
+            <span class="checkmark"></span>
+          </label>
+          <div class="fakelib-item-info">
+            <div class="fakelib-item-name-wrap">
+              <span class="fakelib-item-name">${escapeHtml(item.fileName)}</span>
+              <span class="badge-subfolder">${escapeHtml(item.targetSubDir)}/</span>
+              ${badgeHtml}
+            </div>
+            <div class="fakelib-item-desc">${escapeHtml(item.description || item.moduleName)}</div>
+          </div>
+        </div>
+        <div class="fakelib-item-right">
+          <span class="fakelib-item-size">${escapeHtml(item.sizeFormatted || '')}</span>
+        </div>
+      `;
+
+      const chk = row.querySelector('.chk-fakelib-item');
+      chk.addEventListener('change', () => {
+        const source = inputSource.value.trim();
+        if (!source) return;
+        const isEnabled = chk.checked;
+        sendToHost('toggleFakelib', {
+          source,
+          fileName: item.fileName,
+          enabled: isEnabled,
+          targetSdk: selectBackportSdk?.value || '0x0400000000000000'
+        });
+        updateFakelibCount();
+      });
+
+      fakelibList.appendChild(row);
+    });
+  }
+
+  function updateFakelibStagedState(fileName, isStaged) {
+    const chk = document.querySelector(`.chk-fakelib-item[data-filename="${fileName}"]`);
+    if (chk) {
+      chk.checked = isStaged;
+    }
+    updateFakelibCount();
+  }
+
+  function updateFakelibCount() {
+    if (!fakelibCountBadge) return;
+    const all = document.querySelectorAll('.chk-fakelib-item');
+    const checked = document.querySelectorAll('.chk-fakelib-item:checked');
+    fakelibCountBadge.textContent = `${checked.length} of ${all.length} staged`;
+    fakelibCountBadge.className = checked.length > 0 ? 'badge success' : 'badge';
+  }
+
+  function sanitizeDomId(str) {
+    return (str || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  }
 
   btnBuild.addEventListener('click', () => {
     const source = inputSource.value.trim();
@@ -368,7 +606,8 @@
     const passcode = inputPasscode.value.trim();
     const mode = selectMode.value;
     const imageMode = selectImageMode.value;
-    const compression = selectCompression.value;
+    let compression = selectCompression.value;
+    if (compression === 'zlib') compression = 'none';
     const chunks = parseInt(inputChunks.value, 10) || 1;
     const deterministic = chkDeterministic.checked;
     const verify = chkVerify.checked;
@@ -383,9 +622,14 @@
       return;
     }
 
+    const excludedFakelibs = Array.from(document.querySelectorAll('.chk-fakelib-item:not(:checked)'))
+      .map(cb => cb.dataset.filename)
+      .filter(Boolean);
+
     // Immediately switch UI to Building state & show Cancel button and progress bars
     isBuilding = true;
     btnBuild.style.display = 'none';
+    if (btnStageBackport) btnStageBackport.disabled = true;
     if (btnCancel) {
       btnCancel.style.display = 'inline-flex';
       btnCancel.disabled = false;
@@ -415,7 +659,9 @@
       autoFself: chkAlreadyPatched && chkAlreadyPatched.checked ? false : autoFself,
       autoBackport: chkAlreadyPatched && chkAlreadyPatched.checked ? false : (chkBackport ? chkBackport.checked : true),
       alreadyPatched: chkAlreadyPatched ? chkAlreadyPatched.checked : false,
-      targetSdk: selectBackportSdk ? selectBackportSdk.value : '0x0400000000000000'
+      workDir: inputWorkdir ? inputWorkdir.value.trim() : '',
+      targetSdk: selectBackportSdk ? selectBackportSdk.value : '0x0400000000000000',
+      excludedFakelibs
     });
   });
 
@@ -443,6 +689,10 @@
           backportSdkContainer.style.opacity = '0.3';
           backportSdkContainer.style.pointerEvents = 'none';
         }
+        if (btnStageBackport) {
+          btnStageBackport.disabled = true;
+          btnStageBackport.style.opacity = '0.35';
+        }
       } else {
         if (chkFself) {
           chkFself.disabled = false;
@@ -458,6 +708,10 @@
         if (backportSdkContainer) {
           backportSdkContainer.style.opacity = savedBackport ? '1' : '0.45';
           backportSdkContainer.style.pointerEvents = savedBackport ? 'auto' : 'none';
+        }
+        if (btnStageBackport) {
+          btnStageBackport.disabled = false;
+          btnStageBackport.style.opacity = '1';
         }
       }
     });
@@ -1041,6 +1295,58 @@
 
   if (unpackOutDir) {
     enableDragAndDrop(unpackOutDir, 'unpackDir', unpackOutDir.closest('.unpack-form-row'));
+  }
+
+  // Completion sound (CloneDVD / ImgBurn style triumphant success chime)
+  function playCompletionSound() {
+    try {
+      const audio = new Audio('sounds/success.wav');
+      audio.volume = 0.85;
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(() => {
+          playSynthesizedChime();
+        });
+      }
+    } catch {
+      playSynthesizedChime();
+    }
+  }
+
+  function playSynthesizedChime() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      if (ctx.state === 'suspended') ctx.resume();
+
+      const notes = [
+        { f: 523.25, start: 0.00, dur: 0.35, vol: 0.25 }, // C5
+        { f: 659.25, start: 0.12, dur: 0.40, vol: 0.28 }, // E5
+        { f: 783.99, start: 0.24, dur: 0.45, vol: 0.30 }, // G5
+        { f: 1046.50, start: 0.38, dur: 1.20, vol: 0.40 }, // C6
+        { f: 523.25, start: 0.38, dur: 1.10, vol: 0.15 },
+        { f: 659.25, start: 0.38, dur: 1.10, vol: 0.15 }
+      ];
+
+      const now = ctx.currentTime;
+      notes.forEach(n => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(n.f, now + n.start);
+
+        gain.gain.setValueAtTime(0.001, now + n.start);
+        gain.gain.exponentialRampToValueAtTime(n.vol, now + n.start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + n.start + n.dur);
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        osc.start(now + n.start);
+        osc.stop(now + n.start + n.dur);
+      });
+    } catch { }
   }
 
 })();

@@ -343,8 +343,19 @@ public static class ProsperoPackageBuilder
 			list.Add("PS5 publishing keys are unavailable.");
 		}
 		EnsureParamJson(options, fullPath, action, list);
-		FileInfo[] array = new DirectoryInfo(fullPath).EnumerateFiles("*", SearchOption.AllDirectories).ToArray();
-		int value = new DirectoryInfo(fullPath).EnumerateDirectories("*", SearchOption.AllDirectories).Count() + 1;
+		FileInfo[] array = new DirectoryInfo(fullPath).EnumerateFiles("*", SearchOption.AllDirectories)
+			.Where((FileInfo file) => !file.Name.StartsWith("._", StringComparison.Ordinal) &&
+			                          !file.Name.Equals(".DS_Store", StringComparison.OrdinalIgnoreCase) &&
+			                          !file.Name.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) &&
+			                          !file.Name.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase) &&
+			                          !file.Name.EndsWith(".gp4", StringComparison.OrdinalIgnoreCase) &&
+			                          !file.Name.EndsWith(".gp5", StringComparison.OrdinalIgnoreCase))
+			.ToArray();
+		int value = new DirectoryInfo(fullPath).EnumerateDirectories("*", SearchOption.AllDirectories)
+			.Count((DirectoryInfo dir) => !dir.Name.Equals("__MACOSX", StringComparison.OrdinalIgnoreCase) &&
+			                              !dir.Name.Equals(".Trashes", StringComparison.OrdinalIgnoreCase) &&
+			                              !dir.Name.Equals(".Spotlight-V100", StringComparison.OrdinalIgnoreCase) &&
+			                              !dir.Name.Equals(".fseventsd", StringComparison.OrdinalIgnoreCase)) + 1;
 		long value2 = array.Sum((FileInfo file) => file.Length);
 		action($"Source scan: {array.Length:N0} files in {value:N0} directories, {value2:N0} bytes ({FormatByteSize(value2)}).");
 		foreach (FileInfo item in array.OrderByDescending((FileInfo file) => file.Length).ThenBy((FileInfo file) => file.FullName, StringComparer.Ordinal).Take(5))
@@ -455,6 +466,7 @@ public static class ProsperoPackageBuilder
 			OuterPfsSeed = options.OuterPfsSeed,
 			DeterministicBuild = options.DeterministicBuild,
 			MetadataSigner = options.MetadataSigner,
+			WorkDirectory = options.WorkDirectory,
 			LicenseProvider = options.LicenseProvider ?? new LibProsperoPkg.PKG.FakeLicenseProvider()
 		};
 		bool num = options.UsePublisherPprNaps && options.Mode != ProsperoPackageMode.AdditionalContentNoData;
@@ -513,7 +525,7 @@ public static class ProsperoPackageBuilder
 		try
 		{
 			log(flag2 ? "Finalizing the CNT into a Retail (FIH) image..." : "Finalizing the CNT into a debug (FIH) image...");
-			Func<Stream, byte[]> siArchiveStreamFactory = ((flag2 || siInputs == null) ? null : ((Func<Stream, byte[]>)((Stream mountImage) => ProsperoSiArchive.BuildDebugSiSegment(siInputs.Xml, siInputs.PlayGoChunkDat, mountImage, siInputs.InnerImageSize, warnings, siInputs.NapsMeta18, siInputs.IncludePfsImageXml, siInputs.ContentFiles, siInputs.InnerImage, siInputs.NapsIntegrityProvider, siInputs.NapsPfsImageKey, siInputs.NapsPfsImageSeed, log, options.MaxHashingThreads))));
+			Func<Stream, byte[]> siArchiveStreamFactory = ((flag2 || siInputs == null) ? null : ((Func<Stream, byte[]>)((Stream mountImage) => ProsperoSiArchive.BuildDebugSiSegment(siInputs.Xml, siInputs.PlayGoChunkDat, mountImage, siInputs.InnerImageSize, warnings, siInputs.NapsMeta18, siInputs.IncludePfsImageXml, siInputs.ContentFiles, siInputs.InnerImage, siInputs.NapsIntegrityProvider, siInputs.NapsPfsImageKey, siInputs.NapsPfsImageSeed, log, options.MaxHashingThreads, outerImageDigests: siInputs.OuterImageDigests))));
 			IReadOnlyList<string> collection = ProsperoFihBuilder.BuildFromCnt(text2, text, flag2 ? ProsperoFihVariant.Official : ProsperoFihVariant.Debug, log, null, null, siArchiveStreamFactory, nestedImageDigest, (long)(siInputs?.NapsLayoutSize ?? 0), siInputs?.NestedMetaBaseBlocks ?? 0, siInputs?.ContentVersionHigh ?? 0, (int)(siInputs?.FihNapsFileCount ?? 0), siInputs?.AppFileCount ?? 0, siInputs?.SparseAfidCount ?? 0, siInputs?.EmptyFileCount ?? 0, siInputs?.OuterSuperblockIndex ?? (-1), options.RetailFinalizationProvider);
 			warnings.AddRange(collection);
 			ProsperoPkgType? prosperoPkgType = ProsperoPkgReader.DetectType(text);

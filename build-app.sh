@@ -33,6 +33,11 @@ if [ -d "gui/Resources/fakelib" ]; then
     cp -R gui/Resources/fakelib/* LibProsperoPkg.app/Contents/Resources/fakelib/
 fi
 
+if [ -d "gui/Resources/sounds" ]; then
+    mkdir -p LibProsperoPkg.app/Contents/Resources/sounds
+    cp -R gui/Resources/sounds/* LibProsperoPkg.app/Contents/Resources/sounds/
+fi
+
 cat << 'EOF' > LibProsperoPkg.app/Contents/Info.plist
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -49,9 +54,9 @@ cat << 'EOF' > LibProsperoPkg.app/Contents/Info.plist
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.6.0</string>
+    <string>2.0.0</string>
     <key>CFBundleVersion</key>
-    <string>1.6.0</string>
+    <string>2.0.0</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
@@ -70,8 +75,8 @@ codesign --force --deep --sign - LibProsperoPkg.app
 codesign --verify --deep --strict --verbose=2 LibProsperoPkg.app
 
 echo "Creating DMG installer..."
-DMG_FILE="LibProsperoPkg-v1.6.0-$PLAT.dmg"
-ZIP_FILE="LibProsperoPkg-v1.6.0-$PLAT.app.zip"
+DMG_FILE="LibProsperoPkg-v2.0.0-$PLAT.dmg"
+ZIP_FILE="LibProsperoPkg-v2.0.0-$PLAT.app.zip"
 
 rm -rf dmg_staging "$DMG_FILE" "$ZIP_FILE"
 mkdir -p dmg_staging

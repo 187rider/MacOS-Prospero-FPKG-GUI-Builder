@@ -23,7 +23,7 @@ public sealed class PprPfsKrakenWriteOptions
 
 	/// <summary>
 	/// Maximum number of independent 256-KiB Kraken groups compressed concurrently.
-	/// The default is 1 for low-level API compatibility.
+	/// Defaults to all available logical processors for maximum throughput.
 	/// </summary>
-	public int MaxDegreeOfParallelism { get; set; } = 1;
+	public int MaxDegreeOfParallelism { get; set; } = Math.Max(1, Environment.ProcessorCount);
 }

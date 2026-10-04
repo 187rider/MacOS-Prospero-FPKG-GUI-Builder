@@ -43,4 +43,5 @@ internal sealed class ProsperoSiBuildInputs
 	public int AppFileCount { get; init; }
 
 	public int OuterSuperblockIndex { get; init; } = -1;
+	public byte[]? OuterImageDigests { get; init; }
 }

@@ -37,13 +37,6 @@ public static class ProsperoSha3
 			9223372039002292353uL, 9223372036854808704uL, 2147483649uL, 9223372039002292232uL
 		};
 
-		private static readonly int[] Rotation = new int[25]
-		{
-			0, 1, 62, 28, 27, 36, 44, 6, 55, 20,
-			3, 10, 43, 25, 39, 41, 45, 15, 21, 8,
-			18, 2, 61, 56, 14
-		};
-
 		private readonly ulong[] lanes = new ulong[25];
 
 		private readonly byte[] pending = new byte[136];
@@ -114,42 +107,117 @@ public static class ProsperoSha3
 
 		public static void Permute(Span<ulong> a)
 		{
-			Span<ulong> span = stackalloc ulong[5];
-			Span<ulong> span2 = stackalloc ulong[5];
-			Span<ulong> span3 = stackalloc ulong[25];
+			Span<ulong> c = stackalloc ulong[5];
+			Span<ulong> d = stackalloc ulong[5];
+			Span<ulong> b = stackalloc ulong[25];
+
 			ulong[] roundConstants = RoundConstants;
-			foreach (ulong num in roundConstants)
+			for (int r = 0; r < 24; r++)
 			{
-				for (int j = 0; j < 5; j++)
-				{
-					span[j] = a[j] ^ a[j + 5] ^ a[j + 10] ^ a[j + 15] ^ a[j + 20];
-				}
-				for (int k = 0; k < 5; k++)
-				{
-					span2[k] = span[(k + 4) % 5] ^ BitOperations.RotateLeft(span[(k + 1) % 5], 1);
-				}
-				for (int l = 0; l < 5; l++)
-				{
-					for (int m = 0; m < 5; m++)
-					{
-						a[m + 5 * l] ^= span2[m];
-					}
-				}
-				for (int n = 0; n < 5; n++)
-				{
-					for (int num2 = 0; num2 < 5; num2++)
-					{
-						span3[n + 5 * ((2 * num2 + 3 * n) % 5)] = BitOperations.RotateLeft(a[num2 + 5 * n], Rotation[num2 + 5 * n]);
-					}
-				}
-				for (int num3 = 0; num3 < 5; num3++)
-				{
-					for (int num4 = 0; num4 < 5; num4++)
-					{
-						a[num4 + 5 * num3] = span3[num4 + 5 * num3] ^ (~span3[(num4 + 1) % 5 + 5 * num3] & span3[(num4 + 2) % 5 + 5 * num3]);
-					}
-				}
-				a[0] ^= num;
+				// Theta step
+				c[0] = a[0] ^ a[5] ^ a[10] ^ a[15] ^ a[20];
+				c[1] = a[1] ^ a[6] ^ a[11] ^ a[16] ^ a[21];
+				c[2] = a[2] ^ a[7] ^ a[12] ^ a[17] ^ a[22];
+				c[3] = a[3] ^ a[8] ^ a[13] ^ a[18] ^ a[23];
+				c[4] = a[4] ^ a[9] ^ a[14] ^ a[19] ^ a[24];
+
+				d[0] = c[4] ^ BitOperations.RotateLeft(c[1], 1);
+				d[1] = c[0] ^ BitOperations.RotateLeft(c[2], 1);
+				d[2] = c[1] ^ BitOperations.RotateLeft(c[3], 1);
+				d[3] = c[2] ^ BitOperations.RotateLeft(c[4], 1);
+				d[4] = c[3] ^ BitOperations.RotateLeft(c[0], 1);
+
+				ulong a00 = a[0] ^ d[0];
+				ulong a01 = a[1] ^ d[1];
+				ulong a02 = a[2] ^ d[2];
+				ulong a03 = a[3] ^ d[3];
+				ulong a04 = a[4] ^ d[4];
+
+				ulong a05 = a[5] ^ d[0];
+				ulong a06 = a[6] ^ d[1];
+				ulong a07 = a[7] ^ d[2];
+				ulong a08 = a[8] ^ d[3];
+				ulong a09 = a[9] ^ d[4];
+
+				ulong a10 = a[10] ^ d[0];
+				ulong a11 = a[11] ^ d[1];
+				ulong a12 = a[12] ^ d[2];
+				ulong a13 = a[13] ^ d[3];
+				ulong a14 = a[14] ^ d[4];
+
+				ulong a15 = a[15] ^ d[0];
+				ulong a16 = a[16] ^ d[1];
+				ulong a17 = a[17] ^ d[2];
+				ulong a18 = a[18] ^ d[3];
+				ulong a19 = a[19] ^ d[4];
+
+				ulong a20 = a[20] ^ d[0];
+				ulong a21 = a[21] ^ d[1];
+				ulong a22 = a[22] ^ d[2];
+				ulong a23 = a[23] ^ d[3];
+				ulong a24 = a[24] ^ d[4];
+
+				// Rho and Pi steps
+				b[0]  = a00;
+				b[10] = BitOperations.RotateLeft(a01, 1);
+				b[20] = BitOperations.RotateLeft(a02, 62);
+				b[5]  = BitOperations.RotateLeft(a03, 28);
+				b[15] = BitOperations.RotateLeft(a04, 27);
+
+				b[16] = BitOperations.RotateLeft(a05, 36);
+				b[1]  = BitOperations.RotateLeft(a06, 44);
+				b[11] = BitOperations.RotateLeft(a07, 6);
+				b[21] = BitOperations.RotateLeft(a08, 55);
+				b[6]  = BitOperations.RotateLeft(a09, 20);
+
+				b[7]  = BitOperations.RotateLeft(a10, 3);
+				b[17] = BitOperations.RotateLeft(a11, 10);
+				b[2]  = BitOperations.RotateLeft(a12, 43);
+				b[12] = BitOperations.RotateLeft(a13, 25);
+				b[22] = BitOperations.RotateLeft(a14, 39);
+
+				b[23] = BitOperations.RotateLeft(a15, 41);
+				b[8]  = BitOperations.RotateLeft(a16, 45);
+				b[18] = BitOperations.RotateLeft(a17, 15);
+				b[3]  = BitOperations.RotateLeft(a18, 21);
+				b[13] = BitOperations.RotateLeft(a19, 8);
+
+				b[14] = BitOperations.RotateLeft(a20, 18);
+				b[24] = BitOperations.RotateLeft(a21, 2);
+				b[9]  = BitOperations.RotateLeft(a22, 61);
+				b[19] = BitOperations.RotateLeft(a23, 56);
+				b[4]  = BitOperations.RotateLeft(a24, 14);
+
+				// Chi & Iota steps
+				a[0]  = (b[0]  ^ (~b[1]  & b[2])) ^ roundConstants[r];
+				a[1]  = b[1]  ^ (~b[2]  & b[3]);
+				a[2]  = b[2]  ^ (~b[3]  & b[4]);
+				a[3]  = b[3]  ^ (~b[4]  & b[0]);
+				a[4]  = b[4]  ^ (~b[0]  & b[1]);
+
+				a[5]  = b[5]  ^ (~b[6]  & b[7]);
+				a[6]  = b[6]  ^ (~b[7]  & b[8]);
+				a[7]  = b[7]  ^ (~b[8]  & b[9]);
+				a[8]  = b[8]  ^ (~b[9]  & b[5]);
+				a[9]  = b[9]  ^ (~b[5]  & b[6]);
+
+				a[10] = b[10] ^ (~b[11] & b[12]);
+				a[11] = b[11] ^ (~b[12] & b[13]);
+				a[12] = b[12] ^ (~b[13] & b[14]);
+				a[13] = b[13] ^ (~b[14] & b[10]);
+				a[14] = b[14] ^ (~b[10] & b[11]);
+
+				a[15] = b[15] ^ (~b[16] & b[17]);
+				a[16] = b[16] ^ (~b[17] & b[18]);
+				a[17] = b[17] ^ (~b[18] & b[19]);
+				a[18] = b[18] ^ (~b[19] & b[15]);
+				a[19] = b[19] ^ (~b[15] & b[16]);
+
+				a[20] = b[20] ^ (~b[21] & b[22]);
+				a[21] = b[21] ^ (~b[22] & b[23]);
+				a[22] = b[22] ^ (~b[23] & b[24]);
+				a[23] = b[23] ^ (~b[24] & b[20]);
+				a[24] = b[24] ^ (~b[20] & b[21]);
 			}
 		}
 	}

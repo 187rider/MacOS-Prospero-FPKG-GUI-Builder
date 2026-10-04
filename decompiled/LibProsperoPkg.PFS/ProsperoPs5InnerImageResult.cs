@@ -71,10 +71,10 @@ public sealed class ProsperoPs5InnerImageResult
 	/// <summary>Opens the physical image without materializing it when this is a file-backed result.</summary>
 	public Stream OpenImage()
 	{
-		if (ImagePath != null)
+		if (ImagePath != null && File.Exists(ImagePath))
 		{
 			return new FileStream(ImagePath, FileMode.Open, FileAccess.Read, FileShare.Read, 1048576, FileOptions.RandomAccess);
 		}
-		return new MemoryStream(Image, writable: false);
+		return new MemoryStream(Image ?? Array.Empty<byte>(), writable: false);
 	}
 }

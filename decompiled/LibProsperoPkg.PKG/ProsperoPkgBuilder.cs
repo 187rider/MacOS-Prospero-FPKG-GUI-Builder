@@ -77,7 +77,7 @@ public static class ProsperoPkgBuilder
 		("pic2.png", "pic2.dds", 8288u)
 	};
 
-	private static readonly HashSet<uint> GeneratedEntryIds = new HashSet<uint> { 4096u };
+	private static readonly HashSet<uint> GeneratedEntryIds = new HashSet<uint> { 1034u, 4096u, 8208u, 8209u };
 
 	public static uint ContentTypeFor(ProsperoVolumeType type)
 	{
@@ -216,6 +216,22 @@ public static class ProsperoPkgBuilder
 		BuildImageOnce();
 		nestedImageDigest = capturedNestedDigest;
 		siInputs = capturedSi;
+		if (props.AutoValidate && props.VolumeType != ProsperoVolumeType.AdditionalContentNoData)
+		{
+			log("[validation] Running automatic post-build package integrity and PlayGo validation...");
+			ProsperoPackageValidationReport validationReport = ProsperoPackageArchive.ValidatePackage(outputPath, computeSha256: false, props.PublisherImageMode);
+			foreach (string warning in validationReport.Warnings)
+			{
+				log(" [validation warning] " + warning);
+			}
+			if (!validationReport.IsValid)
+			{
+				string validationErrors = string.Join("; ", validationReport.Errors);
+				log(" [validation error] " + validationErrors);
+				throw new InvalidDataException("Automatic package validation failed: " + validationErrors);
+			}
+			log($"[validation] Automatic validation passed: ContentId={validationReport.ContentId}, PlayGo={validationReport.PlayGoValid}, SuperblockICV=OK, Layout={validationReport.HasNapsLayout}.");
+		}
 		log($"Done: {Path.GetFileName(outputPath)} ({new FileInfo(outputPath).Length:N0} bytes).");
 		return outputPath;
 		void BuildImageOnce()
@@ -383,7 +399,7 @@ public static class ProsperoPkgBuilder
 			long requiredOutputSpace = sourceBytes + 536870912L;
 			long requiredTempSpace = (sourceBytes * 2L) + 536870912L;
 
-			string tempPath = Path.GetTempPath();
+			string tempPath = ResolveTempDirectory(props);
 			string outDir = Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? "/";
 			DriveInfo outDrive = new DriveInfo(outDir);
 			DriveInfo tempDrive = new DriveInfo(tempPath);
@@ -419,7 +435,7 @@ public static class ProsperoPkgBuilder
 		}
 
 		long num = ToUnixSeconds(props.TimeStamp);
-		string text = Path.Combine(Path.GetTempPath(), "libprospero-publisher-" + Guid.NewGuid().ToString("N"));
+		string text = Path.Combine(ResolveTempDirectory(props), "libprospero-publisher-" + Guid.NewGuid().ToString("N"));
 		string text2 = text + ".pfs_image.dat";
 		string path = text + ".naps_pkg_layout.dat";
 		string text3 = text + ".outer.pfs";
@@ -510,9 +526,9 @@ public static class ProsperoPkgBuilder
 			}
 		}
 		ulong num5 = Align((ulong)prosperoPs5InnerImageResult.ImageLength, 65536uL);
-		ulong num6 = checked(65536 + (ulong)prosperoOuterPackageFileResult.PfsSize);
-		ulong num7 = Math.Min((num5 >= 65536) ? (num5 - 65536) : 0, num6);
-		ulong mchunk1Size = num6 - num7;
+		ulong num6 = (ulong)prosperoOuterPackageFileResult.PfsSize;
+		ulong num7 = Math.Min(num5, num6);
+		ulong mchunk1Size = (num6 > num7) ? (num6 - num7) : 0uL;
 		Pkg pkg = BuildContainer(props, array4, sourceFolder, (ulong)prosperoOuterPackageFileResult.PfsSize, prosperoOuterPackageFileResult.ImageDigests.Length, playgoFileCount, num7, mchunk1Size, list, publisherNwonly: true, array3);
 		((GenericEntry)pkg.Entries.First((Entry e) => e.Id == EntryId.IMAGEDIGS_DAT)).FileData = ProsperoImageDigests.ToStoredImageDigestTable(prosperoOuterPackageFileResult.ImageDigests);
 		bool flag3 = false;
@@ -534,7 +550,7 @@ public static class ProsperoPkgBuilder
 					props.CancellationToken.ThrowIfCancellationRequested();
 					fileStream.Write(array5, 0, num10);
 					num9 += num10;
-					if ((num9 & 0x1FFFFFF) == 0L)
+					if (props.MaxHashingThreads <= 2 && (num9 & 0x1FFFFFF) == 0L)
 					{
 						Thread.Sleep(8);
 					}
@@ -578,7 +594,8 @@ public static class ProsperoPkgBuilder
 				NestedMetaBaseBlocks = nestedMetaBaseBlocks,
 				ContentVersionHigh = num4,
 				AppFileCount = num3,
-				OuterSuperblockIndex = prosperoOuterPackageFileResult.SuperblockIndex
+				OuterSuperblockIndex = prosperoOuterPackageFileResult.SuperblockIndex,
+				OuterImageDigests = prosperoOuterPackageFileResult.ImageDigests
 			};
 			log($"[stage 5/5] Finalization inputs ready: {list2.Count:N0} content records, PlayGo={props.PlayGoChunkCount} chunk(s), SI will be generated from the final mount image.");
 			flag3 = true;
@@ -606,6 +623,21 @@ public static class ProsperoPkgBuilder
 			}
 			return (Path: text, Size: file.size);
 		}).ToList();
+	}
+
+	private static string ResolveTempDirectory(ProsperoPkgBuildProperties props)
+	{
+		string? candidate = props.WorkDirectory;
+		if (string.IsNullOrWhiteSpace(candidate))
+		{
+			candidate = Environment.GetEnvironmentVariable("LIBPROSPERO_TEMP_DIR");
+		}
+		if (!string.IsNullOrWhiteSpace(candidate))
+		{
+			Directory.CreateDirectory(candidate);
+			return Path.GetFullPath(candidate);
+		}
+		return Path.GetTempPath();
 	}
 
 	private static ProsperoInnerCompression ResolveInnerCompression(ProsperoPkgBuildProperties props)
@@ -758,7 +790,13 @@ public static class ProsperoPkgBuilder
 		{
 			string fullPath = Path.GetFullPath(path);
 			string fullPath2 = Path.GetFullPath(Path.GetTempPath());
-			if (fullPath.StartsWith(fullPath2, StringComparison.OrdinalIgnoreCase) && Directory.Exists(fullPath))
+			bool isSafe = fullPath.StartsWith(fullPath2, StringComparison.OrdinalIgnoreCase);
+			string? customWork = Environment.GetEnvironmentVariable("LIBPROSPERO_TEMP_DIR");
+			if (!isSafe && !string.IsNullOrWhiteSpace(customWork))
+			{
+				isSafe = fullPath.StartsWith(Path.GetFullPath(customWork), StringComparison.OrdinalIgnoreCase);
+			}
+			if (isSafe && Directory.Exists(fullPath))
 			{
 				Directory.Delete(fullPath, recursive: true);
 			}
@@ -1057,12 +1095,20 @@ public static class ProsperoPkgBuilder
 			}
 			foreach (string item in Directory.EnumerateDirectories(path).OrderBy(Path.GetFileName, StringComparer.Ordinal))
 			{
+				string dirName = Path.GetFileName(item);
+				if (dirName.Equals("__MACOSX", StringComparison.OrdinalIgnoreCase) ||
+				    dirName.Equals(".Trashes", StringComparison.OrdinalIgnoreCase) ||
+				    dirName.Equals(".Spotlight-V100", StringComparison.OrdinalIgnoreCase) ||
+				    dirName.Equals(".fseventsd", StringComparison.OrdinalIgnoreCase))
+				{
+					continue;
+				}
 				string relativePath = Path.GetRelativePath(sourceRoot, item);
-				if (!IsExcluded(Path.GetFileName(item), relativePath, readOnlyList4) && !IsExcluded(Path.GetFileName(item), relativePath, readOnlyList6))
+				if (!IsExcluded(dirName, relativePath, readOnlyList4) && !IsExcluded(dirName, relativePath, readOnlyList6))
 				{
 					FSDir fSDir3 = new FSDir
 					{
-						name = Path.GetFileName(item),
+						name = dirName,
 						Parent = node
 					};
 					node.Dirs.Add(fSDir3);
@@ -1072,7 +1118,9 @@ public static class ProsperoPkgBuilder
 			foreach (string item2 in Directory.EnumerateFiles(path).OrderBy(Path.GetFileName, StringComparer.Ordinal))
 			{
 				string fileName = Path.GetFileName(item2);
-				if (!fileName.EndsWith(".gp4", StringComparison.OrdinalIgnoreCase) &&
+				if (!fileName.StartsWith("._", StringComparison.Ordinal) &&
+				    !fileName.Equals(".DS_Store", StringComparison.OrdinalIgnoreCase) &&
+				    !fileName.EndsWith(".gp4", StringComparison.OrdinalIgnoreCase) &&
 				    !fileName.EndsWith(".gp5", StringComparison.OrdinalIgnoreCase) &&
 				    !fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) &&
 				    !fileName.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase))
@@ -1300,12 +1348,23 @@ public static class ProsperoPkgBuilder
 			for (int num = 0; num < array3.Length; num++)
 			{
 				var (id, name, fileData) = array3[num];
-				if (!pkg2.Entries.Any((Entry e) => e.Id == (EntryId)id))
+				var existing = pkg2.Entries.FirstOrDefault((Entry e) => (uint)e.Id == id) as GenericEntry;
+				if (existing == null)
 				{
 					pkg2.Entries.Add(new GenericEntry((EntryId)id, name)
 					{
 						FileData = fileData
 					});
+				}
+				else if (id == 4097u && existing.FileData != null && existing.FileData.Length >= 336)
+				{
+					ulong existingSize = BinaryPrimitives.ReadUInt64LittleEndian(existing.FileData.AsSpan(328, 8));
+					if (existingSize == 0 && mchunk0Size > 0)
+					{
+						BinaryPrimitives.WriteUInt64LittleEndian(existing.FileData.AsSpan(328, 8), mchunk0Size);
+						BinaryPrimitives.WriteUInt64LittleEndian(existing.FileData.AsSpan(336, 8), mchunk0Size);
+						BinaryPrimitives.WriteUInt64LittleEndian(existing.FileData.AsSpan(344, 8), mchunk1Size);
+					}
 				}
 			}
 		}
@@ -1951,11 +2010,34 @@ public static class ProsperoPkgBuilder
 			{
 				jsonObject["sdkVersion"] = VersionText(num);
 			}
-			ulong reqFw = HexVersion(jsonObject["requiredSystemSoftwareVersion"]);
-			if (reqFw == 0)
+			else if (num > 0)
 			{
-				ulong value = Math.Max(Math.Min(reqFw, 648518346341351424uL), num);
-				jsonObject["requiredSystemSoftwareVersion"] = VersionText(value);
+				ulong currentParamSdk = HexVersion(jsonObject["sdkVersion"]);
+				if (currentParamSdk > num)
+				{
+					jsonObject["sdkVersion"] = VersionText(num);
+				}
+			}
+			ulong reqFw = HexVersion(jsonObject["requiredSystemSoftwareVersion"]);
+			if (reqFw == 0 || reqFw > 0x0100000000000000uL)
+			{
+				jsonObject["requiredSystemSoftwareVersion"] = "0x0100000000000000";
+			}
+			if (jsonObject.ContainsKey("targetSystemSoftwareVersion"))
+			{
+				jsonObject.Remove("targetSystemSoftwareVersion");
+			}
+			if (jsonObject.ContainsKey("originContentVersion"))
+			{
+				jsonObject.Remove("originContentVersion");
+			}
+			if (jsonObject.ContainsKey("targetContentVersion"))
+			{
+				jsonObject.Remove("targetContentVersion");
+			}
+			if (jsonObject.TryGetPropertyValue("downloadDataSize", out var dds) && (dds?.GetValue<long>() ?? 0) > 0)
+			{
+				jsonObject["downloadDataSize"] = 0;
 			}
 			JsonObject jsonObject4 = jsonObject;
 			if (jsonObject4["applicationDrmType"] == null)
@@ -2120,7 +2202,10 @@ public static class ProsperoPkgBuilder
 				foreach (string item in Directory.EnumerateFiles(text2, "*", SearchOption.AllDirectories))
 				{
 					string fileName = Path.GetFileName(item);
-					if (fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase))
+					if (fileName.StartsWith("._", StringComparison.Ordinal) ||
+					    fileName.Equals(".DS_Store", StringComparison.OrdinalIgnoreCase) ||
+					    fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
+					    fileName.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase))
 					{
 						continue;
 					}
@@ -2146,6 +2231,8 @@ public static class ProsperoPkgBuilder
 					string text5 = Path.GetRelativePath(text3, item2).Replace('\\', '/');
 					string fileName = Path.GetFileName(item2);
 					if (!MatchesGp5Exclude(fileName, text5, masks) && !MatchesGp5Exclude(fileName, text5, array) && !IsInGp5ExcludedDirectory(text5, dirMasks, array) &&
+					    !fileName.StartsWith("._", StringComparison.Ordinal) &&
+					    !fileName.Equals(".DS_Store", StringComparison.OrdinalIgnoreCase) &&
 					    !fileName.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) && !fileName.EndsWith(".esbak", StringComparison.OrdinalIgnoreCase))
 					{
 						string key2 = Path.GetRelativePath(text4, item2).Replace('\\', '/');
@@ -2309,8 +2396,31 @@ public static class ProsperoPkgBuilder
 			var (text2, num) = mediaFiles[j];
 			if (sceSysFiles.TryGetValue(text2, out var value))
 			{
-				emitted.Add(num);
 				byte[] fileData = File.ReadAllBytes(value);
+				if (num == 4097u)
+				{
+					if (fileData.Length >= 100 && fileData.AsSpan(0, 4).SequenceEqual("plgx"u8))
+					{
+						if (!string.IsNullOrEmpty(contentId) && contentId.Length == 36)
+						{
+							string existingCid = Encoding.ASCII.GetString(fileData, 64, Math.Min(36, fileData.Length - 64));
+							if (!string.Equals(existingCid, contentId, StringComparison.OrdinalIgnoreCase))
+							{
+								Encoding.ASCII.GetBytes(contentId).CopyTo(fileData.AsSpan(64, 36));
+							}
+						}
+						ulong mask = BinaryPrimitives.ReadUInt64LittleEndian(fileData.AsSpan(56, 8));
+						if (mask == 0 || mask == 0x4000000000000000uL)
+						{
+							fileData.AsSpan(56, 8).Fill(0xFF);
+						}
+					}
+					else
+					{
+						continue;
+					}
+				}
+				emitted.Add(num);
 				yield return new GenericEntry((EntryId)num, text2)
 				{
 					FileData = fileData

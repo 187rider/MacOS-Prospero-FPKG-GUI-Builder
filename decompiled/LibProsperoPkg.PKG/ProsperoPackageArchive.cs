@@ -4,6 +4,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using LibProsperoPkg.PFS;
 using LibProsperoPkg.PFS.Compression;
 using LibProsperoPkg.Util;
@@ -30,6 +33,311 @@ public static class ProsperoPackageArchive
 			}
 			return ProsperoPublisherRsa.VerifyCntHeaderWrap(array, array2);
 		}
+	}
+
+	public static ProsperoPackageValidationReport ValidatePackage(string packagePath, bool computeSha256 = false, ProsperoPublisherImageMode? expectedMode = null)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(packagePath, nameof(packagePath));
+		if (!File.Exists(packagePath))
+		{
+			ProsperoPackageValidationReport missingReport = new ProsperoPackageValidationReport
+			{
+				PackagePath = packagePath,
+				IsValid = false
+			};
+			missingReport.Errors.Add($"Package file does not exist: {packagePath}");
+			return missingReport;
+		}
+
+		using FileStream stream = new FileStream(packagePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4 * 1024 * 1024, FileOptions.RandomAccess);
+		return ValidatePackage(stream, packagePath, computeSha256, expectedMode);
+	}
+
+	public static ProsperoPackageValidationReport ValidatePackage(Stream stream, string? packagePath = null, bool computeSha256 = false, ProsperoPublisherImageMode? expectedMode = null)
+	{
+		ArgumentNullException.ThrowIfNull(stream, nameof(stream));
+		ProsperoPackageValidationReport report = new ProsperoPackageValidationReport
+		{
+			PackagePath = packagePath ?? string.Empty,
+			FileSize = stream.Length
+		};
+
+		if (stream.Length < 4096)
+		{
+			report.Errors.Add("Package file is too small to contain a valid FIH or CNT header.");
+			report.IsValid = false;
+			return report;
+		}
+
+		long originalPos = stream.Position;
+		try
+		{
+			stream.Position = 0;
+			ProsperoPkgType? type = ProsperoPkgReader.DetectType(stream);
+			report.ContainerType = type?.ToString() ?? "Unknown";
+
+			Span<byte> fihBuffer = stackalloc byte[48];
+			stream.Position = 0;
+			stream.ReadExactly(fihBuffer);
+
+			bool isFih = fihBuffer.Slice(0, 4).SequenceEqual("\u007fFIH"u8);
+			bool isCnt = fihBuffer.Slice(0, 4).SequenceEqual("\u007fCNT"u8);
+
+			if (!isFih && !isCnt)
+			{
+				report.Errors.Add("Package does not begin with valid \\x7fFIH or \\x7fCNT magic.");
+				report.IsValid = false;
+				return report;
+			}
+
+			if (isFih)
+			{
+				report.SignedByte = fihBuffer[5];
+				if (report.SignedByte != 0 && report.SignedByte != 128)
+				{
+					report.Warnings.Add($"FIH signed byte is 0x{report.SignedByte:X2} (expected 0x00 for debug/fpkg or 0x80 for retail).");
+				}
+
+				long outerOffset = checked((long)BinaryPrimitives.ReadUInt64LittleEndian(fihBuffer.Slice(32, 8)));
+				if (outerOffset < 0 || outerOffset + 896 > stream.Length)
+				{
+					report.Errors.Add("FIH header contains an invalid outer superblock offset (0x" + outerOffset.ToString("X") + ").");
+				}
+				else
+				{
+					stream.Position = outerOffset + 28;
+					Span<byte> modeSpan = stackalloc byte[2];
+					stream.ReadExactly(modeSpan);
+					report.OuterMode = BinaryPrimitives.ReadUInt16LittleEndian(modeSpan);
+					if (report.OuterMode != 13) // 0x000D
+					{
+						report.Warnings.Add($"Outer PFS mode is 0x{report.OuterMode:X4} (expected 0x000D for publisher outer PFS).");
+					}
+
+					stream.Position = outerOffset + 880;
+					byte[] seedBytes = new byte[16];
+					stream.ReadExactly(seedBytes);
+					report.SeedMarker = Encoding.ASCII.GetString(seedBytes);
+
+					if (expectedMode == ProsperoPublisherImageMode.PlaintextNoAuth &&
+					    !string.Equals(report.SeedMarker, "PPRPLAIN-NOAUTH!", StringComparison.Ordinal))
+					{
+						report.Errors.Add("The outer PFS does not contain the expected PPRPLAIN-NOAUTH! seed marker.");
+					}
+				}
+			}
+
+			// Package inspection and map check
+			ProsperoPackageMap map;
+			try
+			{
+				map = Inspect(stream);
+			}
+			catch (Exception ex)
+			{
+				report.Errors.Add("Package map inspection failed: " + ex.Message);
+				report.IsValid = false;
+				return report;
+			}
+
+			if (isFih)
+			{
+				if (map.OuterPfsOffset < 65536 || map.OuterPfsSize <= 0)
+				{
+					report.Errors.Add("Invalid outer PFS segment geometry in package map.");
+				}
+				if (map.CntOffset != map.OuterPfsOffset + map.OuterPfsSize)
+				{
+					report.Errors.Add("CNT offset does not immediately follow the outer PFS segment.");
+				}
+			}
+
+			// Read Package CNT entries
+			ProsperoPkg pkg;
+			try
+			{
+				pkg = ProsperoPkgReader.Read(stream);
+			}
+			catch (Exception ex)
+			{
+				report.Errors.Add("Failed reading package CNT container: " + ex.Message);
+				report.IsValid = false;
+				return report;
+			}
+
+			report.ContentId = pkg.Header?.ContentId ?? string.Empty;
+			if (string.IsNullOrWhiteSpace(report.ContentId))
+			{
+				report.Errors.Add("Package CNT header is missing Content ID.");
+			}
+
+			// Validate outer PFS superblock ICV
+			if (isFih && map.OuterSuperblockIndex >= 0)
+			{
+				long sbOffset = map.OuterPfsOffset + (long)map.OuterSuperblockIndex * 65536L;
+				if (sbOffset + 65536L <= stream.Length)
+				{
+					stream.Position = sbOffset;
+					byte[] sb = new byte[65536];
+					stream.ReadExactly(sb);
+					byte[] actualIcv = ProsperoOuterPfsSignature.ComputeSuperblockIcv(sb);
+					byte[] expectedIcv = sb.AsSpan(896, 32).ToArray();
+					if (!actualIcv.AsSpan().SequenceEqual(expectedIcv))
+					{
+						report.Errors.Add("Outer PFS superblock ICV mismatch. Integrity check vector is invalid.");
+					}
+					else
+					{
+						report.OuterSuperblockValid = true;
+					}
+				}
+				else
+				{
+					report.Errors.Add("Superblock offset is beyond the end of the stream.");
+				}
+			}
+
+			// Validate param.json
+			long baseOffset = (long)(pkg.Fih?.EmbeddedCntOffset ?? 0UL);
+			ProsperoPkgEntry? paramEntry = pkg.Entries.FirstOrDefault(e => e.RawId == 0x2000 || string.Equals(e.Name, "param.json", StringComparison.OrdinalIgnoreCase));
+			if (paramEntry != null)
+			{
+				stream.Position = baseOffset + paramEntry.DataOffset;
+				byte[] pdata = new byte[paramEntry.DataSize];
+				stream.ReadExactly(pdata);
+				try
+				{
+					using JsonDocument doc = JsonDocument.Parse(pdata);
+					JsonElement root = doc.RootElement;
+					if (root.TryGetProperty("contentId", out JsonElement cidProp))
+					{
+						string pCid = cidProp.GetString() ?? string.Empty;
+						if (!string.Equals(pCid, report.ContentId, StringComparison.OrdinalIgnoreCase))
+						{
+							report.Errors.Add($"param.json contentId '{pCid}' does not match package contentId '{report.ContentId}'.");
+						}
+					}
+					else
+					{
+						report.Errors.Add("param.json is missing required 'contentId' property.");
+					}
+
+					if (root.TryGetProperty("sdkVersion", out JsonElement sdkProp))
+					{
+						report.SdkVersion = sdkProp.GetString();
+						if (ulong.TryParse(report.SdkVersion?.Replace("0x", string.Empty), System.Globalization.NumberStyles.HexNumber, null, out ulong sdkVal))
+						{
+							report.IsDownpatched = sdkVal <= 0x0400000000000000uL;
+							if (!report.IsDownpatched)
+							{
+								report.Warnings.Add($"param.json sdkVersion is {report.SdkVersion} (> 0x0400000000000000). On FW 4.xx consoles, this title will fail to launch unless downpatched.");
+							}
+						}
+					}
+
+					if (root.TryGetProperty("requiredSystemSoftwareVersion", out JsonElement reqFwProp))
+					{
+						report.RequiredSystemSoftwareVersion = reqFwProp.GetString();
+						if (!string.Equals(report.RequiredSystemSoftwareVersion, "0x0100000000000000", StringComparison.OrdinalIgnoreCase))
+						{
+							report.Warnings.Add($"requiredSystemSoftwareVersion is '{report.RequiredSystemSoftwareVersion}' (recommended: 0x0100000000000000 for cross-firmware compatibility).");
+						}
+					}
+				}
+				catch (Exception ex)
+				{
+					report.Errors.Add("Failed parsing param.json: " + ex.Message);
+				}
+			}
+			else
+			{
+				report.Warnings.Add("Package does not contain param.json.");
+			}
+
+			// Validate playgo-chunk.dat
+			ProsperoPkgEntry? playgoEntry = pkg.Entries.FirstOrDefault(e => e.RawId == 0x1001 || string.Equals(e.Name, "playgo-chunk.dat", StringComparison.OrdinalIgnoreCase));
+			if (playgoEntry != null)
+			{
+				stream.Position = baseOffset + playgoEntry.DataOffset;
+				byte[] pdata = new byte[playgoEntry.DataSize];
+				stream.ReadExactly(pdata);
+				if (pdata.Length >= 100 && pdata.AsSpan(0, 4).SequenceEqual("plgx"u8))
+				{
+					string pCid = Encoding.ASCII.GetString(pdata, 64, Math.Min(36, pdata.Length - 64)).TrimEnd('\0');
+					report.PlayGoContentId = pCid;
+					ulong mask = BinaryPrimitives.ReadUInt64LittleEndian(pdata.AsSpan(56, 8));
+					report.PlayGoChunkMask = mask;
+					ulong chunkSize = pdata.Length >= 336 ? BinaryPrimitives.ReadUInt64LittleEndian(pdata.AsSpan(328, 8)) : ulong.MaxValue;
+					if (!string.Equals(pCid, report.ContentId, StringComparison.OrdinalIgnoreCase))
+					{
+						report.Errors.Add($"playgo-chunk.dat Content ID mismatch: expected '{report.ContentId}', found '{pCid}'. PlayGo service will reject this package.");
+						report.PlayGoValid = false;
+					}
+					else if (mask == 0 || mask == 0x4000000000000000uL)
+					{
+						report.Errors.Add($"playgo-chunk.dat chunk mask is corrupted (0x{mask:X16}).");
+						report.PlayGoValid = false;
+					}
+					else if (pdata.Length >= 336 && chunkSize == 0 && (report.InnerFileCount > 0 || isFih))
+					{
+						report.Errors.Add("playgo-chunk.dat Chunk #0 size is 0 bytes (corrupted PlayGo chunk extent).");
+						report.PlayGoValid = false;
+					}
+					else
+					{
+						report.PlayGoValid = true;
+					}
+				}
+				else
+				{
+					report.Errors.Add("playgo-chunk.dat has invalid plgx header or is truncated.");
+					report.PlayGoValid = false;
+				}
+			}
+			else
+			{
+				report.PlayGoValid = true;
+			}
+
+			// Validate outer PFS & NAPS layout
+			if (isFih && map.OuterPfsSize > 0)
+			{
+				try
+				{
+					using var r2 = new LibProsperoPkg.Util.StreamReader(stream, map.OuterPfsOffset);
+					var pfs = new PfsReader(r2, 0uL, null, null, null, (long)map.OuterSuperblockIndex * 65536L, encryptedDataAlreadyDecrypted: true);
+					var files = pfs.GetAllFiles().ToList();
+					report.InnerFileCount = files.Count;
+					var napsFile = files.FirstOrDefault(f => string.Equals(Path.GetFileName(f.FullName), "naps_pkg_layout.dat", StringComparison.OrdinalIgnoreCase));
+					if (napsFile != null)
+					{
+						report.HasNapsLayout = true;
+						byte[] napsBytes = napsFile.ReadAllBytes();
+						var doc = ProsperoNapsLayout.Parse(napsBytes);
+						report.InnerFileCount = doc.Counts.NumFiles;
+						var plan = LibProsperoPkg.PFS.Compression.ProsperoNapsImage.BuildPlan(doc);
+						report.NapsSpanCount = plan.Spans.Count;
+					}
+				}
+				catch (Exception ex)
+				{
+					report.Errors.Add("Outer PFS / NAPS layout validation error: " + ex.Message);
+				}
+			}
+
+			if (computeSha256)
+			{
+				stream.Position = 0;
+				report.Sha256 = Convert.ToHexString(SHA256.HashData(stream));
+			}
+		}
+		finally
+		{
+			try { stream.Position = originalPos; } catch { }
+		}
+
+		report.IsValid = report.Errors.Count == 0;
+		return report;
 	}
 
 	public static ProsperoPackageMap Inspect(string path)

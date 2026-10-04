@@ -34,3 +34,5 @@ LibProsperoPkg.app/
 *.log
 original_elf_headers.json
 fpkg-cli
+.restore-points/
+.agents/

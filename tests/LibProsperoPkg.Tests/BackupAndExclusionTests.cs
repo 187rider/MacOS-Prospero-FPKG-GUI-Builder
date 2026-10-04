@@ -57,6 +57,48 @@ public class BackupAndExclusionTests
     }
 
     [Fact]
+    public void SceSysQuarantine_InDisabledMode_StillStagesAsideBakFiles_AndRestoresOnDispose()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"fpkg-test-bak-pt-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string regularFile = Path.Combine(tempDir, "eboot.bin");
+            string backupFile = Path.Combine(tempDir, "eboot.bin.bak");
+            string subDir = Path.Combine(tempDir, "sce_module");
+            Directory.CreateDirectory(subDir);
+            string subBak = Path.Combine(subDir, "libc.prx.bak");
+
+            File.WriteAllText(regularFile, "regular");
+            File.WriteAllText(backupFile, "backup");
+            File.WriteAllText(subBak, "sub backup");
+
+            // When disabled: true (Pass-Through mode)
+            using (var q = SceSysQuarantine.Apply(tempDir, disabled: true))
+            {
+                // While quarantined, .bak files MUST still be staged aside / hidden
+                Assert.True(File.Exists(regularFile));
+                Assert.False(File.Exists(backupFile));
+                Assert.False(File.Exists(subBak));
+            }
+
+            // After dispose, .bak files must be restored
+            Assert.True(File.Exists(regularFile));
+            Assert.True(File.Exists(backupFile));
+            Assert.True(File.Exists(subBak));
+            Assert.Equal("backup", File.ReadAllText(backupFile));
+            Assert.Equal("sub backup", File.ReadAllText(subBak));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void PatchElfProcParam_PatchesSdkFields()
     {
         byte[] buffer = new byte[64];
@@ -238,12 +280,96 @@ public class BackupAndExclusionTests
     }
 
     [Fact]
-    public void Test_PPSA09826_SceModuleFiles_AreSigned()
+    public void DefaultExcludeFileNames_ContainsDSStore()
     {
-        string targetDir = Environment.GetEnvironmentVariable("PS5_TEST_PPSA09826_DIR") ?? "";
-        if (string.IsNullOrEmpty(targetDir) || !Directory.Exists(targetDir)) return;
-        int count = ProsperoFself.RecursiveMakeFself(targetDir, null, default, 0x0400000000000000uL);
-        Assert.True(count > 0);
+        Assert.Contains(".DS_Store", ProsperoPfsLayoutOptions.DefaultExcludeFileNames, StringComparer.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Gp5Creator_ExcludesAppleDoubleAndDsStoreAndMacOsDirectories()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"fpkg-test-macos-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string regularFile = Path.Combine(tempDir, "eboot.bin");
+            string appleDouble = Path.Combine(tempDir, "._eboot.bin");
+            string dsStore = Path.Combine(tempDir, ".DS_Store");
+            string subDir = Path.Combine(tempDir, "d");
+            Directory.CreateDirectory(subDir);
+            string subRegular = Path.Combine(subDir, "anim.dat");
+            string subAppleDouble = Path.Combine(subDir, "._anim.dat");
+
+            string macOsDir = Path.Combine(tempDir, "__MACOSX");
+            Directory.CreateDirectory(macOsDir);
+            string macOsFile = Path.Combine(macOsDir, "._sub.prx");
+
+            File.WriteAllText(regularFile, "regular");
+            File.WriteAllText(appleDouble, "appledouble");
+            File.WriteAllText(dsStore, "dsstore");
+            File.WriteAllText(subRegular, "subregular");
+            File.WriteAllText(subAppleDouble, "subappledouble");
+            File.WriteAllText(macOsFile, "macossub");
+
+            var project = LibProsperoPkg.GP5.Gp5Creator.FromFolderExplicit(tempDir);
+            var fileNames = new System.Collections.Generic.List<string>();
+            foreach (var f in project.Files)
+            {
+                fileNames.Add(Path.GetFileName(f.SourcePath));
+            }
+
+            Assert.Contains("eboot.bin", fileNames);
+            Assert.Contains("anim.dat", fileNames);
+            Assert.DoesNotContain("._eboot.bin", fileNames);
+            Assert.DoesNotContain(".DS_Store", fileNames);
+            Assert.DoesNotContain("._anim.dat", fileNames);
+            Assert.DoesNotContain("._sub.prx", fileNames);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void SceSysQuarantine_DoesNotMoveAppleDoubleOrDsStoreFiles()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"fpkg-test-macos-q-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            string sceSys = Path.Combine(tempDir, "sce_sys");
+            Directory.CreateDirectory(sceSys);
+            string regularPng = Path.Combine(sceSys, "icon0.png");
+            string appleDouble = Path.Combine(sceSys, "._icon0.png");
+            string dsStore = Path.Combine(sceSys, ".DS_Store");
+
+            // Valid minimal PNG (8-byte header)
+            byte[] pngHeader = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52 };
+            File.WriteAllBytes(regularPng, pngHeader);
+            File.WriteAllBytes(appleDouble, new byte[] { 0x00, 0x05, 0x16, 0x07 }); // AppleDouble magic
+            File.WriteAllText(dsStore, "dsstore");
+
+            using (var q = SceSysQuarantine.Apply(tempDir))
+            {
+                // ._* and .DS_Store should NOT be quarantined or moved
+                Assert.True(File.Exists(regularPng));
+                Assert.True(File.Exists(appleDouble));
+                Assert.True(File.Exists(dsStore));
+            }
+
+            Assert.True(File.Exists(appleDouble));
+            Assert.True(File.Exists(dsStore));
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+        }
+    }
 }

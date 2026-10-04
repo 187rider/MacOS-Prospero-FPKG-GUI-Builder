@@ -59,4 +59,8 @@ public sealed class ProsperoPkgBuildProperties
 	public IProsperoLicenseProvider? LicenseProvider { get; init; }
 
 	public int MaxHashingThreads { get; init; } = 2;
+
+	public string? WorkDirectory { get; init; }
+
+	public bool AutoValidate { get; init; } = true;
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.IO;
+using System.Threading.Tasks;
 using LibProsperoPkg.PFS.Compression.Oodle;
 
 namespace LibProsperoPkg.PFS.Compression;
@@ -186,29 +187,46 @@ public static class ProsperoCompressedPfsFileWriter
 		int[] array4 = new int[num];
 		int[] array5 = new int[num];
 		int[] array6 = new int[num];
-		long num2 = 0L;
-		long num3 = 0L;
-		int num4;
-		for (int i = 0; i < num; num3 += array[i].Length, num2 += num4, i++)
+		unsafe
 		{
-			num4 = (array6[i] = (int)((payload.Length != 0) ? Math.Min(blockSize, payload.Length - num2) : 0));
-			ReadOnlySpan<byte> data = ((num4 == 0) ? default(ReadOnlySpan<byte>) : payload.Slice((int)num2, num4));
-			EncodedBlock? encodedBlock = ((num4 == 0) ? ((EncodedBlock?)null) : OodleKrakenEncoder.EncodeBlock(data, useHuffmanArrays));
-			if (encodedBlock.HasValue)
+			fixed (byte* pPayload = payload)
 			{
-				EncodedBlock valueOrDefault = encodedBlock.GetValueOrDefault();
-				if (KeepCompressed(valueOrDefault.Payload.Length, num4))
+				IntPtr basePtr = (IntPtr)pPayload;
+				int totalPayloadLength = payload.Length;
+
+				Parallel.For(0, num, i =>
 				{
-					array[i] = valueOrDefault.Payload;
-					array2[i] = true;
-					array3[i] = valueOrDefault.MultiChunk;
-					array4[i] = valueOrDefault.FirstChunkCompSize;
-					array5[i] = valueOrDefault.BoundaryFlags;
-					continue;
-				}
+					long blockOffset = (long)i * blockSize;
+					int blockSizeActual = (int)((totalPayloadLength != 0) ? Math.Min(blockSize, totalPayloadLength - blockOffset) : 0);
+					array6[i] = blockSizeActual;
+
+					ReadOnlySpan<byte> data = (blockSizeActual == 0 || basePtr == IntPtr.Zero)
+						? default
+						: new ReadOnlySpan<byte>((byte*)basePtr + blockOffset, blockSizeActual);
+
+					EncodedBlock? encodedBlock = (blockSizeActual == 0) ? null : OodleKrakenEncoder.EncodeBlock(data, useHuffmanArrays);
+					if (encodedBlock.HasValue)
+					{
+						EncodedBlock valueOrDefault = encodedBlock.GetValueOrDefault();
+						if (KeepCompressed(valueOrDefault.Payload.Length, blockSizeActual))
+						{
+							array[i] = valueOrDefault.Payload;
+							array2[i] = true;
+							array3[i] = valueOrDefault.MultiChunk;
+							array4[i] = valueOrDefault.FirstChunkCompSize;
+							array5[i] = valueOrDefault.BoundaryFlags;
+							return;
+						}
+					}
+					array[i] = data.ToArray();
+					array2[i] = false;
+				});
 			}
-			array[i] = data.ToArray();
-			array2[i] = false;
+		}
+		long num3 = 0L;
+		for (int i = 0; i < num; i++)
+		{
+			num3 += array[i].Length;
 		}
 		int num5 = GitHash.Length;
 		int num6 = ShuffleTable.Length;
@@ -245,7 +263,7 @@ public static class ProsperoCompressedPfsFileWriter
 		ShuffleTable.CopyTo(span.Slice(num11));
 		int num18 = blockSize / 2;
 		long num19 = 0L;
-		num2 = 0L;
+		long num2 = 0L;
 		for (int j = 0; j < num; j++)
 		{
 			int num20 = array6[j];

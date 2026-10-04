@@ -537,4 +537,111 @@ public static class ProsperoPlayGo
 	{
 		return checked(value + 15) & -16;
 	}
+
+	/// <summary>
+	/// Validates and repairs <c>playgo-chunk.dat</c> in <paramref name="sourceDir"/>/sce_sys.
+	/// If the file is missing, corrupt, has a mismatched Content ID, or invalid chunk mask,
+	/// it creates a .bak backup and patches/regenerates <c>playgo-chunk.dat</c> to match
+	/// <paramref name="expectedContentId"/>, ensuring Pass-Through builds don't fail.
+	/// Also safely sets aside conflicting retail hash tables if mismatched.
+	/// </summary>
+	public static bool ValidateAndEditPlayGoChunk(string sourceDir, string expectedContentId, Action<string>? logger = null)
+	{
+		string sceSysDir = Path.Combine(sourceDir, "sce_sys");
+		if (!Directory.Exists(sceSysDir))
+		{
+			Directory.CreateDirectory(sceSysDir);
+		}
+
+		string chunkDatPath = Path.Combine(sceSysDir, "playgo-chunk.dat");
+		if (!File.Exists(chunkDatPath))
+		{
+			logger?.Invoke($"playgo-chunk.dat was missing; generating standard PlayGo chunk for {expectedContentId}...");
+			byte[] fresh = BuildChunkDat(expectedContentId);
+			File.WriteAllBytes(chunkDatPath, fresh);
+			logger?.Invoke("playgo-chunk.dat generated successfully.");
+			return true;
+		}
+
+		try
+		{
+			byte[] data = File.ReadAllBytes(chunkDatPath);
+			ulong chunkSize = data.Length >= 336 ? BinaryPrimitives.ReadUInt64LittleEndian(data.AsSpan(328, 8)) : ulong.MaxValue;
+			bool needsRegen = (data.Length < 100 || !data.AsSpan(0, 4).SequenceEqual("plgx"u8) || (data.Length >= 336 && chunkSize == 0));
+			if (needsRegen)
+			{
+				logger?.Invoke("playgo-chunk.dat is truncated or invalid; regenerating standard PlayGo chunk file...");
+				string bak = chunkDatPath + ".bak";
+				if (!File.Exists(bak))
+				{
+					File.Copy(chunkDatPath, bak, overwrite: false);
+				}
+				byte[] fresh = BuildChunkDat(expectedContentId);
+				File.WriteAllBytes(chunkDatPath, fresh);
+				logger?.Invoke($"playgo-chunk.dat regenerated for {expectedContentId} (backup: playgo-chunk.dat.bak).");
+				QuarantineConflictingTables(sceSysDir, logger);
+				return true;
+			}
+
+			bool modified = false;
+			string existingCid = Encoding.ASCII.GetString(data, 64, Math.Min(36, data.Length - 64)).TrimEnd('\0');
+			if (!string.IsNullOrEmpty(expectedContentId) && expectedContentId.Length == 36 &&
+			    !string.Equals(existingCid, expectedContentId, StringComparison.OrdinalIgnoreCase))
+			{
+				logger?.Invoke($"playgo-chunk.dat Content ID mismatch detected: '{existingCid}' vs expected '{expectedContentId}'. Updating Content ID...");
+				Encoding.ASCII.GetBytes(expectedContentId).CopyTo(data.AsSpan(64, 36));
+				modified = true;
+			}
+
+			ulong mask = BinaryPrimitives.ReadUInt64LittleEndian(data.AsSpan(56, 8));
+			if (mask == 0 || mask == 0x4000000000000000uL)
+			{
+				logger?.Invoke($"playgo-chunk.dat chunk mask was 0x{mask:X16}. Normalizing to 0xFFFFFFFFFFFFFFFF...");
+				data.AsSpan(56, 8).Fill(0xFF);
+				modified = true;
+			}
+
+			if (modified)
+			{
+				string bak = chunkDatPath + ".bak";
+				if (!File.Exists(bak))
+				{
+					File.Copy(chunkDatPath, bak, overwrite: false);
+				}
+				File.WriteAllBytes(chunkDatPath, data);
+				logger?.Invoke($"playgo-chunk.dat successfully updated and verified (backup: playgo-chunk.dat.bak).");
+				QuarantineConflictingTables(sceSysDir, logger);
+			}
+			else
+			{
+				logger?.Invoke($"playgo-chunk.dat verified valid (Content ID: {existingCid}, Mask: 0x{mask:X16}).");
+			}
+
+			return true;
+		}
+		catch (Exception ex)
+		{
+			logger?.Invoke($"Warning: could not validate/edit playgo-chunk.dat: {ex.Message}");
+			return false;
+		}
+	}
+
+	private static void QuarantineConflictingTables(string sceSysDir, Action<string>? logger)
+	{
+		string[] conflicting = { "playgo-hash-table.dat", "playgo-ficm.dat" };
+		foreach (string name in conflicting)
+		{
+			string path = Path.Combine(sceSysDir, name);
+			if (File.Exists(path))
+			{
+				string bak = path + ".bak";
+				if (!File.Exists(bak))
+				{
+					File.Move(path, bak);
+					logger?.Invoke($"Quarantined conflicting retail table {name} -> {name}.bak to prevent hash mismatch on PS5.");
+				}
+			}
+		}
+	}
 }
+

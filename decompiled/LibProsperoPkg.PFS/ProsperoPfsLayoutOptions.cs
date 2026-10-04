@@ -135,7 +135,7 @@ public sealed class ProsperoPfsLayoutOptions
 	public IReadOnlyCollection<string> ExcludeFileNames { get; set; } = DefaultExcludeFileNames;
 
 	/// <summary>The default file-name exclude set (project files, intermediate caches, …).</summary>
-	public static IReadOnlyCollection<string> DefaultExcludeFileNames { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "keystone", "disc_info.dat", "pfs-version.dat", "ext_info.dat" };
+	public static IReadOnlyCollection<string> DefaultExcludeFileNames { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "keystone", "disc_info.dat", "pfs-version.dat", "ext_info.dat", ".DS_Store" };
 
 	/// <summary>File-name suffixes that are skipped (e.g. the project file itself).</summary>
 	public IReadOnlyCollection<string> ExcludeFileSuffixes { get; set; } = DefaultExcludeFileSuffixes;

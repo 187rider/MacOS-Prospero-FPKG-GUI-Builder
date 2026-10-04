@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
+using LibProsperoPkg.Util;
 
 namespace LibProsperoPkg.PFS.Compression;
 
@@ -26,7 +27,7 @@ public static class ProsperoPfsDigest
 	/// <summary>
 	/// Gets a value indicating whether the host runtime and operating system provide SHA3-256.
 	/// </summary>
-	public static bool IsSupported => SHA3_256.IsSupported;
+	public static bool IsSupported => ProsperoSha3.IsSupported;
 
 	/// <summary>
 	/// Computes the SHA3-256 digest of a single PFS block's <b>uncompressed</b> bytes, matching the
@@ -37,8 +38,7 @@ public static class ProsperoPfsDigest
 	/// <exception cref="T:System.PlatformNotSupportedException">SHA3-256 is unavailable on this host.</exception>
 	public static byte[] ComputeBlockDigest(ReadOnlySpan<byte> uncompressedBlock)
 	{
-		EnsureSupported();
-		return SHA3_256.HashData(uncompressedBlock);
+		return ProsperoSha3.HashData(uncompressedBlock);
 	}
 
 	/// <summary>
@@ -50,8 +50,7 @@ public static class ProsperoPfsDigest
 	/// <exception cref="T:System.PlatformNotSupportedException">SHA3-256 is unavailable on this host.</exception>
 	public static int ComputeBlockDigest(ReadOnlySpan<byte> data, Span<byte> destination)
 	{
-		EnsureSupported();
-		return SHA3_256.HashData(data, destination);
+		return ProsperoSha3.HashData(data, destination);
 	}
 
 	/// <summary>
@@ -66,18 +65,14 @@ public static class ProsperoPfsDigest
 		{
 			return false;
 		}
-		EnsureSupported();
 		Span<byte> span = stackalloc byte[32];
-		SHA3_256.HashData(uncompressedBlock, span);
+		ProsperoSha3.HashData(uncompressedBlock, span);
 		return CryptographicOperations.FixedTimeEquals(span, expected);
 	}
 
 	private static void EnsureSupported()
 	{
-		if (!SHA3_256.IsSupported)
-		{
-			throw new PlatformNotSupportedException("SHA3-256 is required for the PS5 PFSv3 compression format but is not available on this host.");
-		}
+		_ = ProsperoSha3.IsSupported;
 	}
 
 	/// <summary>
@@ -111,12 +106,12 @@ public static class ProsperoPfsDigest
 		BinaryPrimitives.WriteUInt32LittleEndian(span, 1u);
 		headerParams.Slice(0, 8).CopyTo(span.Slice(4));
 		headerParams.Slice(8).CopyTo(span.Slice(16));
-		using IncrementalHash incrementalHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA3_256);
-		incrementalHash.AppendData(span);
-		incrementalHash.AppendData(shuffleSection);
-		incrementalHash.AppendData(boundarySection);
-		incrementalHash.AppendData(blockHashSection);
-		return incrementalHash.GetHashAndReset();
+		ProsperoSha3.Incremental incremental = new ProsperoSha3.Incremental();
+		incremental.AppendData(span);
+		incremental.AppendData(shuffleSection);
+		incremental.AppendData(boundarySection);
+		incremental.AppendData(blockHashSection);
+		return incremental.GetHashAndReset();
 	}
 
 	/// <summary>

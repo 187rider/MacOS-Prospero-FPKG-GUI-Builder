@@ -51,6 +51,9 @@ public sealed class ProsperoBuildOptions
 	/// <summary>Content/master version, formatted <c>NN.NN</c>.</summary>
 	public string Version { get; set; } = "01.00";
 
+	/// <summary>Optional working directory for intermediate temporary files. If null, Path.GetTempPath() is used.</summary>
+	public string? WorkDirectory { get; set; }
+
 	/// <summary>
 	/// UTC package creation time used consistently by PFS timestamps and the publisher
 	/// <c>param.json/pubtools/creationDate</c> field.

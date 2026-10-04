@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -728,80 +729,88 @@ internal static class OodleKrakenEncoder
 		{
 			return null;
 		}
-		int[] array = new int[131072];
-		int[] prev = new int[length];
-		array.AsSpan().Fill(-1);
-		if (length <= 131072)
+		int[] array = ArrayPool<int>.Shared.Rent(131072);
+		int[] prev = ArrayPool<int>.Shared.Rent(length);
+		try
 		{
-			EncodedChunk? encodedChunk = EncodeChunk(data, array, prev, 0, length, withSeed: true, useHuffmanArrays, allowSubLiterals, allowOptimal: true);
-			if (encodedChunk.HasValue)
+			array.AsSpan(0, 131072).Fill(-1);
+			if (length <= 131072)
 			{
-				EncodedChunk valueOrDefault = encodedChunk.GetValueOrDefault();
-				if (valueOrDefault.Payload.Length < length)
+				EncodedChunk? encodedChunk = EncodeChunk(data, array, prev, 0, length, withSeed: true, useHuffmanArrays, allowSubLiterals, allowOptimal: true);
+				if (encodedChunk.HasValue)
 				{
-					int boundaryFlags = 6 | ((valueOrDefault.LiteralMode == 0) ? 1 : 0);
-					return new EncodedBlock(valueOrDefault.Payload, multiChunk: false, valueOrDefault.Payload.Length, boundaryFlags);
+					EncodedChunk valueOrDefault = encodedChunk.GetValueOrDefault();
+					if (valueOrDefault.Payload.Length < length)
+					{
+						int boundaryFlags = 6 | ((valueOrDefault.LiteralMode == 0) ? 1 : 0);
+						return new EncodedBlock(valueOrDefault.Payload, multiChunk: false, valueOrDefault.Payload.Length, boundaryFlags);
+					}
+				}
+				return null;
+			}
+			if (length > 262144)
+			{
+				return null;
+			}
+			EncodedChunk? encodedChunk2 = EncodeChunk(data, array, prev, 0, 131072, withSeed: true, useHuffmanArrays, allowSubLiterals);
+			int num = length - 131072;
+			EncodedChunk? encodedChunk3 = EncodeChunk(data, array, prev, 131072, length, withSeed: false, useHuffmanArrays, allowSubLiterals);
+			int num2;
+			if (encodedChunk2.HasValue)
+			{
+				EncodedChunk valueOrDefault2 = encodedChunk2.GetValueOrDefault();
+				if (valueOrDefault2.Payload.Length <= 131071)
+				{
+					num2 = ((valueOrDefault2.Payload.Length < 131072) ? 1 : 0);
+					goto IL_011f;
 				}
 			}
-			return null;
-		}
-		if (length > 262144)
-		{
-			return null;
-		}
-		EncodedChunk? encodedChunk2 = EncodeChunk(data, array, prev, 0, 131072, withSeed: true, useHuffmanArrays, allowSubLiterals);
-		int num = length - 131072;
-		EncodedChunk? encodedChunk3 = EncodeChunk(data, array, prev, 131072, length, withSeed: false, useHuffmanArrays, allowSubLiterals);
-		int num2;
-		if (encodedChunk2.HasValue)
-		{
-			EncodedChunk valueOrDefault2 = encodedChunk2.GetValueOrDefault();
-			if (valueOrDefault2.Payload.Length <= 131071)
+			num2 = 0;
+			goto IL_011f;
+			IL_011f:
+			bool flag = (byte)num2 != 0;
+			bool flag2 = encodedChunk3.HasValue && encodedChunk3.GetValueOrDefault().Payload.Length < num;
+			if (!allowStoredHalves && (!flag || !flag2))
 			{
-				num2 = ((valueOrDefault2.Payload.Length < 131072) ? 1 : 0);
-				goto IL_011f;
+				return null;
 			}
-		}
-		num2 = 0;
-		goto IL_011f;
-		IL_011f:
-		bool flag = (byte)num2 != 0;
-		bool flag2 = encodedChunk3.HasValue && encodedChunk3.GetValueOrDefault().Payload.Length < num;
-		if (!allowStoredHalves && (!flag || !flag2))
-		{
-			return null;
-		}
-		if (!flag && !flag2)
-		{
-			return null;
-		}
-		byte[] array2 = (flag ? encodedChunk2.Value.Payload : data.Slice(0, 131072).ToArray());
-		byte[] array3 = (flag2 ? encodedChunk3.Value.Payload : data.Slice(131072).ToArray());
-		byte[] array4 = new byte[array2.Length + array3.Length];
-		Buffer.BlockCopy(array2, 0, array4, 0, array2.Length);
-		Buffer.BlockCopy(array3, 0, array4, array2.Length, array3.Length);
-		if (array4.Length >= length)
-		{
-			return null;
-		}
-		int num3 = 4;
-		if (flag)
-		{
-			num3 |= 2;
-			if (encodedChunk2.Value.LiteralMode == 0)
+			if (!flag && !flag2)
 			{
-				num3 |= 1;
+				return null;
 			}
-		}
-		if (flag2)
-		{
-			num3 |= 0x20;
-			if (encodedChunk3.Value.LiteralMode == 0)
+			byte[] array2 = (flag ? encodedChunk2.Value.Payload : data.Slice(0, 131072).ToArray());
+			byte[] array3 = (flag2 ? encodedChunk3.Value.Payload : data.Slice(131072).ToArray());
+			byte[] array4 = new byte[array2.Length + array3.Length];
+			Buffer.BlockCopy(array2, 0, array4, 0, array2.Length);
+			Buffer.BlockCopy(array3, 0, array4, array2.Length, array3.Length);
+			if (array4.Length >= length)
 			{
-				num3 |= 0x10;
+				return null;
 			}
+			int num3 = 4;
+			if (flag)
+			{
+				num3 |= 2;
+				if (encodedChunk2.Value.LiteralMode == 0)
+				{
+					num3 |= 1;
+				}
+			}
+			if (flag2)
+			{
+				num3 |= 0x20;
+				if (encodedChunk3.Value.LiteralMode == 0)
+				{
+					num3 |= 0x10;
+				}
+			}
+			return new EncodedBlock(array4, multiChunk: true, array2.Length, num3);
 		}
-		return new EncodedBlock(array4, multiChunk: true, array2.Length, num3);
+		finally
+		{
+			ArrayPool<int>.Shared.Return(array);
+			ArrayPool<int>.Shared.Return(prev);
+		}
 	}
 
 	/// <summary>
