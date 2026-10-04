@@ -1,3 +1,4 @@
+<img width="1118" height="813" alt="Снимок экрана — 2026-10-04 в 18 28 44" src="https://github.com/user-attachments/assets/60d673c1-349a-4639-8b2b-334cf7081ef3" />
 # Prospero FPKG GUI Builder for macOS 🍎🎮
 
 A high-performance, modern native GUI application for building PlayStation 5 Fake Packages (**FPKG**) on macOS. Built with .NET and [Photino.NET](https://tryphotino.io/) for a lightweight, native WebKit-powered interface.
